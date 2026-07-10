@@ -25,7 +25,7 @@ def main() -> None:
     system_prompt = load_prompt(config.prompt_path)
 
     print(f"Loading model {config.model}...")
-    preload_model(config.ollama_endpoint, config.model)
+    preload_model(config.ollama_endpoint, config.model, config.request_timeout)
 
     chat_file = create_chat_file(config.chat_directory, system_prompt)
 
@@ -56,6 +56,7 @@ def main() -> None:
                 system_prompt=system_prompt,
                 messages=messages,
                 temperature=config.temperature,
+                timeout=config.request_timeout,
             )
             content = extract_content(response)
             formatted = format_json(content)

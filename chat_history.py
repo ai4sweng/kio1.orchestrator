@@ -1,4 +1,5 @@
 import json
+import uuid
 from datetime import datetime
 from pathlib import Path
 
@@ -17,7 +18,8 @@ def create_chat_file(chat_directory: str, system_prompt: str) -> Path:
     directory.mkdir(parents=True, exist_ok=True)
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filepath = directory / f"chat_{timestamp}.jsonl"
+    short_id = uuid.uuid4().hex[:8]
+    filepath = directory / f"chat_{timestamp}_{short_id}.jsonl"
     line = json.dumps({"role": "system", "content": system_prompt})
     filepath.write_text(line + "\n")
     return filepath

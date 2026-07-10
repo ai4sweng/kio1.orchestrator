@@ -35,6 +35,7 @@ class TestConfigLoader:
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
             "temperature": 0.1,
+            "request_timeout": 120,
         }
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
@@ -46,6 +47,7 @@ class TestConfigLoader:
         assert config.prompt_path == "prompts/test.txt"
         assert config.chat_directory == "chats"
         assert config.temperature == 0.1
+        assert config.request_timeout == 120
 
     def test_load_config_missing_file_raises(self) -> None:
         """Verify that a missing config file raises an error.
@@ -74,10 +76,12 @@ class TestConfigLoader:
             prompt_path="p.txt",
             chat_directory="c",
             temperature=0.1,
+            request_timeout=120,
         )
         assert config.model == "m"
         assert config.ollama_endpoint == "http://localhost"
         assert config.temperature == 0.1
+        assert config.request_timeout == 120
 
 
 class TestPromptLoader:
@@ -159,6 +163,21 @@ class TestChatHistory:
         chat_file = create_chat_file(str(chat_dir), "system")
 
         assert chat_file.suffix == ".jsonl"
+
+    def test_create_chat_file_unique_names(self, tmp_path: Path) -> None:
+        """Verify consecutive calls produce unique filenames.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        chat_dir = tmp_path / "chats"
+        file_a = create_chat_file(str(chat_dir), "system")
+        file_b = create_chat_file(str(chat_dir), "system")
+
+        assert file_a.name != file_b.name
 
     def test_append_user_message(self, tmp_path: Path) -> None:
         """Verify user messages are appended as JSONL.
@@ -396,3 +415,95 @@ class TestOllamaClient:
 
         call_args = mock_urlopen.call_args[0][0]
         assert call_args.full_url == "http://myhost:1234/api/chat"
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_passes_timeout(self, mock_urlopen: MagicMock) -> None:
+        """Verify the timeout parameter is forwarded to `urlopen`.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        send_request("http://localhost:11434", "model", "sys", [], timeout=60)
+
+        assert mock_urlopen.call_args[1]["timeout"] == 60
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_passes_custom_temperature(self, mock_urlopen: MagicMock) -> None:
+        """Verify a custom `temperature` is included in the payload options.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        send_request("http://localhost:11434", "model", "sys", [], temperature=0.5)
+
+        call_args = mock_urlopen.call_args[0][0]
+        payload = json.loads(call_args.data.decode("utf-8"))
+        assert payload["options"]["temperature"] == 0.5
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_preload_model_sends_correct_payload(self, mock_urlopen: MagicMock) -> None:
+        """Verify `preload_model` sends the expected payload to Ollama.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = b""
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        preload_model("http://localhost:11434", "test-model")
+
+        call_args = mock_urlopen.call_args[0][0]
+        payload = json.loads(call_args.data.decode("utf-8"))
+
+        assert call_args.full_url == "http://localhost:11434/api/chat"
+        assert payload["model"] == "test-model"
+        assert payload["messages"] == []
+        assert payload["keep_alive"] == -1
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_preload_model_passes_timeout(self, mock_urlopen: MagicMock) -> None:
+        """Verify `preload_model` forwards the `timeout` parameter to `urlopen`.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = b""
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        preload_model("http://localhost:11434", "model", timeout=30)
+
+        assert mock_urlopen.call_args[1]["timeout"] == 30

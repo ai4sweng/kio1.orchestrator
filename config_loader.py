@@ -12,6 +12,7 @@ class Config:
     prompt_path: str
     chat_directory: str
     temperature: float
+    request_timeout: int
 
 
 def load_config(config_path: str = "config.json") -> Config:
@@ -31,4 +32,5 @@ def load_config(config_path: str = "config.json") -> Config:
         prompt_path=data["prompt_path"],
         chat_directory=data["chat_directory"],
         temperature=data["temperature"],
+        request_timeout=data["request_timeout"],
     )

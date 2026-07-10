@@ -3,12 +3,13 @@ import urllib.request
 from typing import Any
 
 
-def preload_model(endpoint: str, model: str) -> None:
+def preload_model(endpoint: str, model: str, timeout: int = 120) -> None:
     """Preload a model into Ollama's memory.
 
     Args:
         endpoint: The Ollama base URL.
         model: The model name to preload.
+        timeout: Request timeout in seconds.
 
     Returns:
         None.
@@ -27,7 +28,7 @@ def preload_model(endpoint: str, model: str) -> None:
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         response.read()
 
 
@@ -37,6 +38,7 @@ def send_request(
     system_prompt: str,
     messages: list[dict[str, str]],
     temperature: float = 0.1,
+    timeout: int = 120,
 ) -> dict[str, Any]:
     """Send a chat completion request to the Ollama API.
 
@@ -46,6 +48,7 @@ def send_request(
         system_prompt: The system prompt text.
         messages: List of message dicts with `role` and `content` keys.
         temperature: Sampling temperature for the model.
+        timeout: Request timeout in seconds.
 
     Returns:
         The parsed JSON response from the model as a dictionary.
@@ -73,7 +76,7 @@ def send_request(
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req) as response:
+    with urllib.request.urlopen(req, timeout=timeout) as response:
         response_data = json.loads(response.read().decode("utf-8"))
 
     return response_data
