@@ -8,7 +8,7 @@ from chat_history import (
 )
 from config_loader import load_config
 from formatter import format_json
-from ollama_client import extract_content, preload_model, send_request
+from provider_client import load_provider
 from prompt_loader import load_prompt
 
 
@@ -24,8 +24,11 @@ def main() -> None:
     config = load_config()
     system_prompt = load_prompt(config.prompt_path)
 
-    print(f"Loading model {config.model}...")
-    preload_model(config.ollama_endpoint, config.model, config.request_timeout)
+    provider = load_provider(config.provider)
+    client = provider.create_client(config)
+    
+    print(f"Loading {config.provider} model {config.model}...")
+    provider.preload(config, client)
 
     chat_file = create_chat_file(config.chat_directory, system_prompt)
 
@@ -48,17 +51,17 @@ def main() -> None:
 
         messages = load_messages(chat_file)
         messages.append({"role": "user", "content": query})
+        
+        content = ""
 
         try:
-            response = send_request(
-                endpoint=config.ollama_endpoint,
-                model=config.model,
+            response = provider.send_request(
+                config=config,
+                client=client,
                 system_prompt=system_prompt,
                 messages=messages,
-                temperature=config.temperature,
-                timeout=config.request_timeout,
             )
-            content = extract_content(response)
+            content = provider.extract_content(response)
             formatted = format_json(content)
 
             append_user_message(chat_file, query)
@@ -67,7 +70,7 @@ def main() -> None:
 
         except Exception as e:
             print(f"\nError: {e}", file=sys.stderr)
-            if "content" in dir() and content:
+            if content:
                 print(f"Raw response: {content!r}", file=sys.stderr)
 
 

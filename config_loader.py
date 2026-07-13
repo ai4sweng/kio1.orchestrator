@@ -1,18 +1,21 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 
 @dataclass
 class Config:
     """Application configuration."""
 
+    provider: str
     model: str
-    ollama_endpoint: str
     prompt_path: str
     chat_directory: str
     temperature: float
     request_timeout: int
+    max_tokens: int
+    provider_options: dict[str, Any] = field(default_factory=dict)
 
 
 def load_config(config_path: str = "config.json") -> Config:
@@ -26,11 +29,19 @@ def load_config(config_path: str = "config.json") -> Config:
     """
     path = Path(config_path)
     data = json.loads(path.read_text())
+    
+    provider_options = data.get("provider_options", {})
+    
+    if not isinstance(provider_options, dict):
+        raise ValueError("provider_options must be a JSON object.")
+    
     return Config(
+        provider=data["provider"],
         model=data["model"],
-        ollama_endpoint=data["ollama_endpoint"],
         prompt_path=data["prompt_path"],
         chat_directory=data["chat_directory"],
         temperature=data["temperature"],
         request_timeout=data["request_timeout"],
+        max_tokens=data["max_tokens"],
+        provider_options=provider_options,
     )
