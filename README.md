@@ -48,6 +48,15 @@ Type your request at the prompt. The orchestrator will return a JSON workflow pl
 pytest tests/ -v
 ```
 
+## Documentation
+
+- [Architecture](docs/architecture.md) — System overview, components, and data flow
+- [Configuration](docs/configuration.md) — All config.json settings explained
+- [Usage Guide](docs/usage.md) — Interactive session examples and workflows
+- [API Reference](docs/api-reference.md) — Module and function documentation
+- [Chat History Format](docs/chat-history.md) — JSONL session file specification
+- [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
+
 ## Project Structure
 
 ```
@@ -61,4 +70,5 @@ formatter.py         - JSON pretty-printing
 prompts/             - System prompt files
 chats/               - Conversation history files (auto-created)
 tests/               - Unit tests
+docs/                - Documentation
 ```
