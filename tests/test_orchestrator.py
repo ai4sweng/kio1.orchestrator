@@ -605,23 +605,83 @@ class TestOpenAIClient:
     """Tests for OpenAI client logic with mocked SDK calls."""
 
     @patch("openai_client.OpenAI")
-    def test_create_client_uses_timeout(self, mock_openai: MagicMock) -> None:
+    def test_create_client_uses_api_key_and_timeout(self, mock_openai: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
         """Verify OpenAI client is created with timeout.
 
         Args:
             mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
 
         Returns:
             None.
         """
+        monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
         config = make_config(provider="openai", request_timeout=12.0, provider_options={})
         create_openai_client(config)
         
 
-        mock_openai.assert_called_once_with(timeout=12.0)
+        mock_openai.assert_called_once_with(api_key="test-api-key", timeout=12.0)
 
-    def test_send_request_calls_responses_create(self) -> None:
-        """Verify OpenAI Responses API call is correctly structured.
+    @patch("openai_client.OpenAI")
+    def test_create_client_rejects_missing_api_key(
+        self,
+        mock_openai: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a clear error is raised when the API key is missing.
+
+        Args:
+            mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.delenv(
+            "OPENAI_API_KEY",
+            raising=False,
+        )
+        config = make_config(
+            provider="openai",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            create_openai_client(config)
+
+        mock_openai.assert_not_called()
+
+    @patch("openai_client.OpenAI")
+    def test_create_client_rejects_blank_api_key(
+        self,
+        mock_openai: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a whitespace-only API key is rejected.
+
+        Args:
+            mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv(
+            "OPENAI_API_KEY",
+            "   ",
+        )
+        config = make_config(
+            provider="openai",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            create_openai_client(config)
+
+        mock_openai.assert_not_called()
+        
+    def test_send_request_calls_chat_completions_create(self) -> None:
+        """Verify OpenAI Chat Completions API call is correctly structured.
 
         Args:
             None.
@@ -640,22 +700,20 @@ class TestOpenAIClient:
             messages,
         )
 
-        client.responses.create.assert_called_once_with(
+        client.chat.completions.create.assert_called_once_with(
             model="test-model",
-            input=[
+            messages=[
                 {"role": "system", "content": "system prompt"},
                 *messages
             ],
             temperature=0.2,
-            max_output_tokens=500,
-            text={
-                "format": {
-                    "type": "json_object",
-                    }
+            max_tokens=500,
+            response_format={
+                "type": "json_object",
             }
         )
 
-    def test_extract_openai_content_gets_output_text(self) -> None:
+    def test_extract_openai_content_gets_message_content(self) -> None:
         """Verify content extraction from OpenAI response object.
 
         Args:
@@ -665,7 +723,7 @@ class TestOpenAIClient:
             None.
         """
         response = MagicMock()
-        response.output_text = '{"result": "ok"}'
+        response.choices[0].message.content = '{"result": "ok"}'
 
         assert extract_openai_content(response) == '{"result": "ok"}'
 
@@ -679,7 +737,7 @@ class TestOpenAIClient:
             None.
         """
         response = MagicMock()
-        response.output_text = '  {"result": "ok"}  \n'
+        response.choices[0].message.content = '  {"result": "ok"}  \n'
 
         assert extract_openai_content(response) == '{"result": "ok"}'
 
@@ -688,19 +746,79 @@ class TestAnthropicClient:
     """Tests for Anthropic client logic with mocked SDK calls."""
 
     @patch("anthropic_client.Anthropic")
-    def test_create_client_uses_timeout(self, mock_anthropic: MagicMock) -> None:
-        """Verify Anthropic client is created with timeout.
+    def test_create_client_uses_api_key_and_timeout(self, mock_anthropic: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Verify Anthropic client is created with API key and timeout.
 
         Args:
             mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest monkeypatch fixture to set environment variables.
 
         Returns:
             None.
         """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-api-key")
         config = make_config(provider="anthropic", request_timeout=12.0, provider_options={})
         create_anthropic_client(config)
 
-        mock_anthropic.assert_called_once_with(timeout=12.0)
+        mock_anthropic.assert_called_once_with(api_key="test-api-key", timeout=12.0)
+
+    @patch("anthropic_client.Anthropic")
+    def test_create_client_rejects_missing_api_key(
+        self,
+        mock_anthropic: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a clear error is raised when the API key is missing.
+
+        Args:
+            mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.delenv(
+            "ANTHROPIC_API_KEY",
+            raising=False,
+        )
+        config = make_config(
+            provider="anthropic",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            create_anthropic_client(config)
+
+        mock_anthropic.assert_not_called()
+
+    @patch("anthropic_client.Anthropic")
+    def test_create_client_rejects_blank_api_key(
+        self,
+        mock_anthropic: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a whitespace-only API key is rejected.
+
+        Args:
+            mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv(
+            "ANTHROPIC_API_KEY",
+            "   ",
+        )
+        config = make_config(
+            provider="anthropic",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            create_anthropic_client(config)
+
+        mock_anthropic.assert_not_called()
 
     def test_send_request_calls_messages_create(self) -> None:
         """Verify Anthropic Messages API call is correctly structured.

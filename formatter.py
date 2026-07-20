@@ -1,7 +1,9 @@
 import ast
 import json
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
 def format_json(raw_json: str) -> str:
     """Parse and pretty-print a JSON string.
@@ -19,6 +21,7 @@ def format_json(raw_json: str) -> str:
     try:
         parsed: Any = json.loads(normalized_content)
     except json.JSONDecodeError:
+        logger.warning("Standard JSON parsing failed, falling back to ast.literal_eval")
         parsed = ast.literal_eval(normalized_content)
     return json.dumps(parsed, indent=2, ensure_ascii=False)
 

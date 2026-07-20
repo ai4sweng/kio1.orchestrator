@@ -52,9 +52,8 @@ def main() -> None:
         messages = load_messages(chat_file)
         messages.append({"role": "user", "content": query})
         
-        content = ""
-
         try:
+            content = ""
             response = provider.send_request(
                 config=config,
                 client=client,

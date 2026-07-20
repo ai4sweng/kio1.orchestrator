@@ -1,8 +1,11 @@
+import os
 from typing import Any
 
 from anthropic import Anthropic
 
 from config_loader import Config
+
+# provider_options is currently unused by this provider.
 
 
 def create_client(config: Config) -> Anthropic:
@@ -14,7 +17,14 @@ def create_client(config: Config) -> Anthropic:
     Returns:
         An Anthropic client.
     """
+    api_key = os.getenv("ANTHROPIC_API_KEY")
+    
+    if not api_key or not api_key.strip():
+        raise ValueError("ANTHROPIC_API_KEY environment variable is required "
+                         "when using the Anthropic provider")
+    
     return Anthropic(
+        api_key=api_key,
         timeout=config.request_timeout,
     )
 
