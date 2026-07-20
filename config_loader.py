@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+ALLOWED_PROVIDERS = {"ollama", "openai", "anthropic"}
 
 @dataclass
 class Config:
@@ -13,7 +14,7 @@ class Config:
     prompt_path: str
     chat_directory: str
     temperature: float
-    request_timeout: int
+    request_timeout: float
     max_tokens: int
     provider_options: dict[str, Any] = field(default_factory=dict)
 
@@ -34,9 +35,13 @@ def load_config(config_path: str = "config.json") -> Config:
     
     if not isinstance(provider_options, dict):
         raise ValueError("provider_options must be a JSON object.")
+
+    provider = data["provider"]
+    if provider not in ALLOWED_PROVIDERS:
+        raise ValueError(f"Unknown provider: {provider!r}")
     
     return Config(
-        provider=data["provider"],
+        provider=provider,
         model=data["model"],
         prompt_path=data["prompt_path"],
         chat_directory=data["chat_directory"],

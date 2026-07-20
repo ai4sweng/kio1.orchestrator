@@ -68,7 +68,7 @@ class TestConfigLoader:
             None.
         """
         config_data = {
-            "provider": "test_provider",
+            "provider": "ollama",
             "model": "test-model",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
@@ -84,7 +84,7 @@ class TestConfigLoader:
 
         config = load_config(str(config_file))
 
-        assert config.provider == "test_provider"
+        assert config.provider == "ollama"
         assert config.model == "test-model"
         assert config.prompt_path == "prompts/test.txt"
         assert config.chat_directory == "chats"
@@ -92,6 +92,32 @@ class TestConfigLoader:
         assert config.request_timeout == 120
         assert config.max_tokens == 2048
         assert config.provider_options == {"custom_option": "custom-value"}
+        
+    def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
+        """Verify an unknown provider value raises a clear error.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        config_data = {
+            "provider": "not_a_real_provider",
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "max_tokens": 2048,
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="Unknown provider"):
+            load_config(str(config_file))
+
+        
     def test_load_config_missing_file_raises(self) -> None:
         """Verify that a missing config file raises an error.
 
@@ -763,7 +789,7 @@ class TestProviderLoading:
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("../openai")
 
-    def test_load_provider_rejects_missing_provider(self) -> None:
-        """Verify a missing provider produces a useful error."""
-        with pytest.raises(ValueError, match="is not installed"):
+    def test_load_provider_rejects_unknown_provider(self) -> None:
+        """Verify a provider outside the allowlist produces a useful error."""
+        with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("missing_provider")

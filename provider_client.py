@@ -2,7 +2,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
 
-from config_loader import Config
+from config_loader import ALLOWED_PROVIDERS , Config
 
 
 class ProviderModule(Protocol):
@@ -38,7 +38,7 @@ def load_provider(provider_name: str) -> ProviderModule:
     Returns:
         A module implementing the provider interface.
     """
-    if not provider_name or not provider_name.isidentifier():
+    if not provider_name or not provider_name.isidentifier() or provider_name not in ALLOWED_PROVIDERS:
         raise ValueError(f"Invalid provider name: {provider_name!r}")
 
     module_name = f"{provider_name}_client"
