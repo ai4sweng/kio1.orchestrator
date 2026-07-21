@@ -58,7 +58,7 @@ Example configuration:
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
-    "max_tokens": 1024,
+    "max_tokens": 2048,
     "provider_options": {
         "endpoint": "http://localhost:11434"
     }
@@ -105,11 +105,11 @@ Example configuration:
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
-    "max_tokens": 1024
+    "max_tokens": 2048
 }
 ```
 
-The OpenAI provider uses the Responses API and requests JSON output.
+The OpenAI provider uses the Chat Completions API and requests JSON output.
 
 ### Anthropic
 
@@ -131,7 +131,7 @@ Example configuration:
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
-    "max_tokens": 1024
+    "max_tokens": 2048
 }
 ```
 
@@ -252,13 +252,7 @@ send_request(config, client, system_prompt, messages)
 extract_content(response)
 ```
 
-To add another provider:
 
-1. Create `<provider>_client.py`.
-2. Implement the four provider functions.
-3. Add any required SDK dependency to `requirements.txt`.
-4. Set `"provider": "<provider>"` in `config.json`.
-5. Add mocked provider tests.
 
 No change to `main.py`, `config_loader.py`, or `provider_client.py` should be required.
 
@@ -270,7 +264,7 @@ config_loader.py     - Provider-neutral configuration loader
 main.py              - Terminal application entry point
 provider_client.py   - Dynamic provider loader and interface
 ollama_client.py     - Ollama HTTP provider
-openai_client.py     - OpenAI Responses API provider
+openai_client.py     - OpenAI Chat Completions API provider
 anthropic_client.py  - Anthropic Messages API provider
 prompt_loader.py     - System-prompt loader
 chat_history.py      - JSONL conversation-history management

@@ -18,10 +18,11 @@ def create_client(config: Config) -> Anthropic:
         An Anthropic client.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
-    
+
     if not api_key or not api_key.strip():
-        raise ValueError("ANTHROPIC_API_KEY environment variable is required "
-                         "when using the Anthropic provider")
+        raise ValueError(
+            "ANTHROPIC_API_KEY environment variable is required when using the Anthropic provider"
+        )
     
     return Anthropic(
         api_key=api_key,
