@@ -39,9 +39,7 @@ def make_config(
 ) -> Config:
     """Create a configuration for provider tests."""
     if provider_options is None:
-        provider_options = {
-            "endpoint": "http://localhost:11434",
-        }
+        provider_options = {"endpoint": "http://localhost:11434"}
 
     return Config(
         provider=provider,
