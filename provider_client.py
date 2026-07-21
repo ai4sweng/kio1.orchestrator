@@ -2,7 +2,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
 
-from config_loader import ALLOWED_PROVIDERS , Config
+from config_loader import ALLOWED_PROVIDERS, Config
 
 
 class ProviderModule(Protocol):
@@ -10,9 +10,11 @@ class ProviderModule(Protocol):
 
     def create_client(self, config: Config) -> Any:
         """Create and return the provider client."""
+        ...
 
     def preload(self, config: Config, client: Any) -> None:
-        """Perform provider-specific initialization."""
+        """Perform provider-specific initialization, such as local model preloading."""
+        ...
 
     def send_request(
         self,
@@ -22,9 +24,11 @@ class ProviderModule(Protocol):
         messages: list[dict[str, str]],
     ) -> Any:
         """Send a request to the provider."""
+        ...
 
     def extract_content(self, response: Any) -> str:
         """Extract assistant text from a provider response."""
+        ...
 
 
 def load_provider(provider_name: str) -> ProviderModule:

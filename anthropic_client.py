@@ -5,8 +5,6 @@ from anthropic import Anthropic
 
 from config_loader import Config
 
-# provider_options is currently unused by this provider.
-
 
 def create_client(config: Config) -> Anthropic:
     """Create an Anthropic client.
@@ -62,7 +60,14 @@ def send_request(
 
 
 def extract_content(response: Any) -> str:
-    """Extract assistant text from an Anthropic response."""
+    """Extract assistant text from an Anthropic response.
+
+    Args:
+        response: The response returned by the Anthropic Messages API.
+
+    Returns:
+        The combined text content with surrounding whitespace removed.
+    """
     text_parts = [
         block.text
         for block in response.content

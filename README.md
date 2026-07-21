@@ -43,7 +43,7 @@ Common configuration fields:
 - `chat_directory`: Directory where conversation history is stored.
 - `temperature`: Sampling temperature passed to the provider.
 - `request_timeout`: Request timeout in seconds.
-- `max_tokens`: Maximum output-token limit.
+- `max_tokens`: Maximum number of generated output tokens; it does not limit the input context.
 - `provider_options`: Optional provider-specific configuration.
 
 ### Ollama

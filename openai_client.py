@@ -6,8 +6,6 @@ from openai import OpenAI
 
 from config_loader import Config
 
-# provider_options is currently unused by this provider.
-
 
 def create_client(config: Config) -> OpenAI:
     """Create an OpenAI client.
@@ -20,8 +18,9 @@ def create_client(config: Config) -> OpenAI:
     """
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or not api_key.strip():
-        raise ValueError("OPENAI_API_KEY environment variable is required "
-                         "when using the OpenAI provider")
+        raise ValueError(
+            "OPENAI_API_KEY environment variable is required when using the OpenAI provider"
+        )
     return OpenAI(
         api_key=api_key,
         timeout=config.request_timeout,
@@ -58,12 +57,17 @@ def send_request(
         ],
         temperature=config.temperature,
         max_tokens=config.max_tokens,
-        response_format={
-            "type": "json_object",
-        },
+        response_format={"type": "json_object"},
     )
 
 
 def extract_content(response: Any) -> str:
-    """Extract assistant text from an OpenAI response."""
+    """Extract assistant text from an OpenAI response.
+
+    Args:
+        response: The response returned by the OpenAI Chat Completions API.
+
+    Returns:
+        The assistant message content with surrounding whitespace removed.
+    """
     return response.choices[0].message.content.strip()

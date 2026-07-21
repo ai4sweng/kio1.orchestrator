@@ -102,12 +102,20 @@ def extract_content(response: dict[str, Any]) -> str:
 
 
 def _get_endpoint(config: Config) -> str:
-    """Read and validate the Ollama endpoint."""
+    """Read and validate the Ollama endpoint.
+
+    Args:
+        config: Application configuration containing provider options.
+
+    Returns:
+        The normalized Ollama endpoint without a trailing slash.
+
+    Raises:
+        ValueError: If provider_options.endpoint is missing or invalid.
+    """
     endpoint = config.provider_options.get("endpoint")
 
     if not isinstance(endpoint, str) or not endpoint:
-        raise ValueError(
-            "Ollama requires provider_options.endpoint"
-        )
+        raise ValueError("Ollama requires provider_options.endpoint")
 
     return endpoint.rstrip("/")
