@@ -1,20 +1,19 @@
 import json
-import tempfile
+from formatter import format_json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config_loader import Config, load_config
-from prompt_loader import load_prompt
 from chat_history import (
-    create_chat_file,
-    append_user_message,
     append_assistant_message,
+    append_user_message,
+    create_chat_file,
     load_messages,
 )
-from formatter import format_json
-from ollama_client import send_request, extract_content, preload_model
+from config_loader import Config, load_config
+from ollama_client import extract_content, preload_model, send_request
+from prompt_loader import load_prompt
 
 
 class TestConfigLoader:
@@ -349,7 +348,9 @@ class TestOllamaClient:
         assert payload["messages"][1] == {"role": "user", "content": "test query"}
 
     @patch("ollama_client.urllib.request.urlopen")
-    def test_send_request_returns_parsed_response(self, mock_urlopen: MagicMock) -> None:
+    def test_send_request_returns_parsed_response(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         """Verify the response is parsed as JSON.
 
         Args:
@@ -439,7 +440,9 @@ class TestOllamaClient:
         assert mock_urlopen.call_args[1]["timeout"] == 60
 
     @patch("ollama_client.urllib.request.urlopen")
-    def test_send_request_passes_custom_temperature(self, mock_urlopen: MagicMock) -> None:
+    def test_send_request_passes_custom_temperature(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         """Verify a custom `temperature` is included in the payload options.
 
         Args:

@@ -1,4 +1,5 @@
 import sys
+from formatter import format_json
 
 from chat_history import (
     append_assistant_message,
@@ -7,7 +8,6 @@ from chat_history import (
     load_messages,
 )
 from config_loader import load_config
-from formatter import format_json
 from ollama_client import extract_content, preload_model, send_request
 from prompt_loader import load_prompt
 

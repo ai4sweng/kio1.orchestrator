@@ -19,6 +19,13 @@ ollama pull ministral-3:8b
 ## Installation
 
 ```bash
+make install
+source .venv/bin/activate
+```
+
+Or manually:
+
+```bash
 python -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -45,8 +52,28 @@ Type your request at the prompt. The orchestrator will return a JSON workflow pl
 ## Running Tests
 
 ```bash
+make test          # run test suite
+make test-cov      # run tests with coverage report
+```
+
+Or directly:
+
+```bash
 pytest tests/ -v
 ```
+
+## Code Quality
+
+```bash
+make format        # auto-format with black + isort
+make format-check  # verify black + isort formatting
+make lint          # ruff linter
+make typecheck     # mypy static analysis
+make check         # lint + typecheck together
+make ci            # full pipeline: format + check + test
+```
+
+See `make help` for all available targets.
 
 ## Documentation
 
@@ -67,6 +94,8 @@ prompt_loader.py     - System prompt loading
 ollama_client.py     - Ollama HTTP client
 chat_history.py      - Conversation history management
 formatter.py         - JSON pretty-printing
+Makefile             - Developer workflow targets
+requirements.txt     - Runtime + dev dependencies
 prompts/             - System prompt files
 chats/               - Conversation history files (auto-created)
 tests/               - Unit tests
