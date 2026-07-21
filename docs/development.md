@@ -77,12 +77,13 @@ All tools are installed as part of `make install` and wired to `make` targets:
 | Target | Tool(s) | Purpose |
 | :--- | :--- | :--- |
 | `make format` | black, isort | Auto-format code and imports |
+| `make format-check` | black, isort | Verify formatting without changing files |
 | `make lint` | ruff | Fast linting and style checks |
 | `make typecheck` | mypy | Static type analysis |
 | `make check` | ruff + mypy | All static checks combined |
 | `make test` | pytest | Run test suite |
 | `make test-cov` | pytest-cov | Run tests with coverage report |
-| `make ci` | all of above | Full pipeline — run before pushing |
+| `make ci` | format + ruff + mypy + pytest | Full pipeline — run before pushing |
 | `make clean` | — | Remove caches and build artefacts |
 
 Run `make help` to see all targets.

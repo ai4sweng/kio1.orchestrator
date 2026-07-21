@@ -1,8 +1,12 @@
 import sys
 from formatter import format_json
 
-from chat_history import (append_assistant_message, append_user_message,
-                          create_chat_file, load_messages)
+from chat_history import (
+    append_assistant_message,
+    append_user_message,
+    create_chat_file,
+    load_messages,
+)
 from config_loader import load_config
 from ollama_client import extract_content, preload_model, send_request
 from prompt_loader import load_prompt

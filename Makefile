@@ -17,8 +17,13 @@ install: ## Create venv and install all dependencies
 
 .PHONY: format
 format: ## Auto-format code (black + isort)
+	$(VENV)/bin/isort --profile black $(SOURCES)
 	$(VENV)/bin/black $(SOURCES)
-	$(VENV)/bin/isort $(SOURCES)
+
+.PHONY: format-check
+format-check: ## Verify code formatting (isort + black)
+	$(VENV)/bin/isort --profile black --check-only $(SOURCES)
+	$(VENV)/bin/black --check $(SOURCES)
 
 # ── Linting & type-checking ──────────────────────────────────────────────────
 
@@ -46,17 +51,17 @@ test-cov: ## Run tests with coverage report
 # ── Composite ────────────────────────────────────────────────────────────────
 
 .PHONY: ci
-ci: check test ## Full CI pipeline: lint + typecheck + tests
+ci: format check test ## Full CI pipeline: format + lint + typecheck + tests
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 
 .PHONY: clean
 clean: ## Remove generated artefacts
-	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
-	find . -name "*.pyc" -delete 2>/dev/null || true
+	find . -path ./$(VENV) -prune -o -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
+	find . -path ./$(VENV) -prune -o -type d -name .mypy_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -path ./$(VENV) -prune -o -type d -name .ruff_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -path ./$(VENV) -prune -o -type d -name .pytest_cache -exec rm -rf {} + 2>/dev/null || true
+	find . -path ./$(VENV) -prune -o -type f -name "*.pyc" -delete 2>/dev/null || true
 	rm -rf htmlcov .coverage
 
 # ── Help ─────────────────────────────────────────────────────────────────────

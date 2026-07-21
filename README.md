@@ -66,10 +66,11 @@ pytest tests/ -v
 
 ```bash
 make format        # auto-format with black + isort
+make format-check  # verify black + isort formatting
 make lint          # ruff linter
 make typecheck     # mypy static analysis
 make check         # lint + typecheck together
-make ci            # full pipeline: check + test
+make ci            # full pipeline: format + check + test
 ```
 
 See `make help` for all available targets.
