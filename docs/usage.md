@@ -3,7 +3,7 @@
 ## Starting the Orchestrator
 
 ```bash
-venv
+source .venv/bin/activate
 python main.py
 ```
 
