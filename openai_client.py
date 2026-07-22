@@ -28,8 +28,19 @@ def create_client(config: Config) -> OpenAI:
 
 
 def preload(config: Config, client: Any) -> None:
-    """Perform no preload operation for OpenAI."""
-    return None
+    """Verify the configured model exists before starting the session.
+
+    Args:
+        config: Application configuration.
+        client: OpenAI client.
+
+    Returns:
+        None.
+
+    Raises:
+        openai.NotFoundError: If config.model does not exist.
+    """
+    client.models.retrieve(config.model)
 
 
 def send_request(
@@ -56,7 +67,6 @@ def send_request(
             [{"role": "system", "content": system_prompt}, *messages],
         ),
         temperature=config.temperature,
-        max_tokens=config.max_tokens,
         response_format={"type": "json_object"},
     )
 

@@ -70,7 +70,6 @@ def send_request(
         "keep_alive": -1,
         "options": {
             "temperature": config.temperature,
-            "num_predict": config.max_tokens,
         },
     }
 

@@ -29,7 +29,7 @@ def format_json(raw_json: str) -> str:
 
 def _strip_markdown_fence(content: str) -> str:
     """Remove an optional Markdown code fence.
-    
+
     Args:
     content: Raw text that may be wrapped in a Markdown code fence.
 

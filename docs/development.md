@@ -16,7 +16,7 @@ source .venv/bin/activate
 
 This creates a `.venv` virtual environment and installs all runtime and development dependencies.
 
-Pull the required model:
+If using Ollama, pull the required model:
 
 ```bash
 ollama pull ministral-3:8b
@@ -28,6 +28,9 @@ ollama pull ministral-3:8b
 main.py              - Entry point (REPL loop)
 config_loader.py     - Configuration loading
 prompt_loader.py     - System prompt file reader
+provider_client.py   - Dynamic provider loader and interface
+openai_client.py     - OpenAI Chat Completions API provider
+anthropic_client.py  - Anthropic Messages API provider
 ollama_client.py     - Ollama HTTP client
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON pretty-printing
@@ -92,7 +95,7 @@ Run `make help` to see all targets.
 
 The project intentionally minimizes external dependencies:
 
-- **Runtime**: Python standard library only (no `requests`, no `httpx`).
+- **Runtime**: `openai >= 1.66.0`, `anthropic >= 0.18.1` (Ollama uses the standard library only — no extra dependency).
 - **Testing**: `pytest >= 7.0`, `pytest-cov >= 4.0`.
 - **Formatting**: `black >= 24.0`, `isort >= 5.13`.
 - **Linting**: `ruff >= 0.4`.

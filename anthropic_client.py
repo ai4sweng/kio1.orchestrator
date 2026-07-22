@@ -6,6 +6,16 @@ from anthropic.types import MessageParam
 
 from config_loader import Config
 
+# Models that reject a custom `temperature` (400 if sent with a non-default value).
+# Omitting the parameter entirely is always safe — the API falls back to its own default.
+_NO_CUSTOM_TEMPERATURE = {
+    "claude-opus-4-7",
+    "claude-opus-4-8",
+    "claude-sonnet-5",
+    "claude-fable-5",
+    "claude-mythos-5",
+}
+
 
 def create_client(config: Config) -> Anthropic:
     """Create an Anthropic client.
@@ -28,8 +38,19 @@ def create_client(config: Config) -> Anthropic:
 
 
 def preload(config: Config, client: Any) -> None:
-    """Perform no preload operation for Anthropic."""
-    return None
+    """Verify the configured model exists before starting the session.
+
+    Args:
+        config: Application configuration.
+        client: Anthropic client.
+
+    Returns:
+        None.
+
+    Raises:
+        anthropic.NotFoundError: If config.model does not exist.
+    """
+    client.models.retrieve(config.model)
 
 
 def send_request(
@@ -47,15 +68,19 @@ def send_request(
         messages: Conversation messages.
 
     Returns:
-        An Anthropic response.
+        An Anthropic response. `temperature` is omitted for models in
+        `_NO_CUSTOM_TEMPERATURE` that reject a custom value.
     """
-    return client.messages.create(
-        model=config.model,
-        system=system_prompt,
-        messages=cast(list[MessageParam], messages),
-        temperature=config.temperature,
-        max_tokens=config.max_tokens,
-    )
+    request_kwargs: dict[str, Any] = {
+        "model": config.model,
+        "system": system_prompt,
+        "messages": cast(list[MessageParam], messages),
+        "max_tokens": config.max_tokens,
+    }
+    if config.model not in _NO_CUSTOM_TEMPERATURE:
+        request_kwargs["temperature"] = config.temperature
+
+    return client.messages.create(**request_kwargs)
 
 
 def extract_content(response: Any) -> str:

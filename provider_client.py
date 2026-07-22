@@ -31,7 +31,9 @@ class ProviderModule(Protocol):
         ...
 
 
-def load_provider(provider_name: str, allowed_providers: frozenset[str]) -> ProviderModule:
+def load_provider(
+    provider_name: str, allowed_providers: frozenset[str]
+) -> ProviderModule:
     """Dynamically load a provider module.
 
     A provider named ``openai`` is loaded from ``openai_client.py``.

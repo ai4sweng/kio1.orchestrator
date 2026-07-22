@@ -8,6 +8,7 @@ import pytest
 
 from anthropic_client import create_client as create_anthropic_client
 from anthropic_client import extract_content as extract_anthropic_content
+from anthropic_client import preload as preload_anthropic
 from anthropic_client import send_request as send_anthropic_request
 from chat_history import (
     append_assistant_message,
@@ -19,6 +20,7 @@ from config_loader import Config, load_config
 from ollama_client import extract_content, preload, send_request
 from openai_client import create_client as create_openai_client
 from openai_client import extract_content as extract_openai_content
+from openai_client import preload as preload_openai
 from openai_client import send_request as send_openai_request
 from prompt_loader import load_prompt
 from provider_client import load_provider
@@ -34,7 +36,7 @@ def make_config(
     provider_options: dict[str, Any] | None = None,
 ) -> Config:
     """Create a configuration for provider tests.
-    
+
     Args:
         provider: Provider name to configure.
         allowed_providers: Set of provider names permitted to load.
@@ -399,7 +401,7 @@ class TestFormatter:
 
     def test_format_json_removes_markdown_fence(self) -> None:
         """Verify fenced JSON is normalized before parsing.
-        
+
         Args:
             None.
 
@@ -575,7 +577,6 @@ class TestOllamaClient:
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
         assert payload["options"]["temperature"] == 0.5
-        assert payload["options"]["num_predict"] == 1024
 
     @patch("ollama_client.urllib.request.urlopen")
     def test_preload_model_sends_correct_payload(self, mock_urlopen: MagicMock) -> None:
@@ -734,7 +735,6 @@ class TestOpenAIClient:
             model="test-model",
             messages=[{"role": "system", "content": "system prompt"}, *messages],
             temperature=0.2,
-            max_tokens=500,
             response_format={
                 "type": "json_object",
             },
@@ -767,6 +767,22 @@ class TestOpenAIClient:
         response.choices[0].message.content = '  {"result": "ok"}  \n'
 
         assert extract_openai_content(response) == '{"result": "ok"}'
+
+    def test_preload_verifies_model_exists(self) -> None:
+        """Verify preload retrieves the model to validate it exists.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        config = make_config(provider="openai", model="gpt-4o-mini")
+
+        preload_openai(config, client)
+
+        client.models.retrieve.assert_called_once_with("gpt-4o-mini")
 
 
 class TestAnthropicClient:
@@ -881,6 +897,28 @@ class TestAnthropicClient:
             max_tokens=500,
         )
 
+    def test_send_request_omits_temperature_for_unsupported_model(self) -> None:
+        """Verify temperature is omitted for models that reject a custom value.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        messages = [{"role": "user", "content": "Build an app"}]
+
+        config = make_config(provider="anthropic", model="claude-opus-4-8")
+        send_anthropic_request(config, client, "system prompt", messages)
+
+        client.messages.create.assert_called_once_with(
+            model="claude-opus-4-8",
+            system="system prompt",
+            messages=messages,
+            max_tokens=1024,
+        )
+
     def test_extract_anthropic_content_gets_text_blocks(self) -> None:
         """Verify content extraction from Anthropic text blocks.
 
@@ -915,6 +953,22 @@ class TestAnthropicClient:
 
         assert extract_anthropic_content(response) == '{"result": "ok"}'
 
+    def test_preload_verifies_model_exists(self) -> None:
+        """Verify preload retrieves the model to validate it exists.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        config = make_config(provider="anthropic", model="claude-haiku-4-5")
+
+        preload_anthropic(config, client)
+
+        client.models.retrieve.assert_called_once_with("claude-haiku-4-5")
+
 
 class TestProviderLoading:
     """Tests for dynamic provider discovery."""
@@ -929,14 +983,16 @@ class TestProviderLoading:
     )
     def test_load_provider(self, provider_name: str) -> None:
         """Verify configured provider modules load successfully.
-        
+
         Args:
             provider_name: Name of the provider module to load.
 
         Returns:
             None.
         """
-        provider = load_provider(provider_name, frozenset({"ollama", "openai", "anthropic"}))
+        provider = load_provider(
+            provider_name, frozenset({"ollama", "openai", "anthropic"})
+        )
 
         assert callable(provider.create_client)
         assert callable(provider.preload)
@@ -945,7 +1001,7 @@ class TestProviderLoading:
 
     def test_load_provider_rejects_invalid_name(self) -> None:
         """Verify unsafe module names are rejected.
-        
+
         Args:
             None.
 
@@ -957,7 +1013,7 @@ class TestProviderLoading:
 
     def test_load_provider_rejects_unknown_provider(self) -> None:
         """Verify a provider outside the allowlist produces a useful error.
-        
+
         Args:
             None.
 
@@ -965,11 +1021,13 @@ class TestProviderLoading:
             None.
         """
         with pytest.raises(ValueError, match="Invalid provider name"):
-            load_provider("missing_provider", frozenset({"ollama", "openai", "anthropic"}))
-    
+            load_provider(
+                "missing_provider", frozenset({"ollama", "openai", "anthropic"})
+            )
+
     def test_load_provider_respects_restricted_allowlist(self) -> None:
         """Verify a provider excluded from the caller's allowlist is rejected.
-        
+
         Args:
             None.
 
@@ -978,4 +1036,3 @@ class TestProviderLoading:
         """
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("openai", frozenset({"ollama"}))
-

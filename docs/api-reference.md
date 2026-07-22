@@ -4,11 +4,16 @@
 config_loader --> Config (dataclass)
                --> load_config()
 
+provider_client --> ProviderModule (Protocol)
+                --> load_provider()
+
 prompt_loader --> load_prompt()
 
-ollama_client --> preload_model()
-              --> send_request()
-              --> extract_content()
+ollama_client / openai_client / anthropic_client
+                --> create_client(config)
+                --> preload(config, client)
+                --> send_request(config, client, system_prompt, messages)
+                --> extract_content(response)
 
 chat_history  --> create_chat_file()
               --> append_user_message()
@@ -24,18 +29,32 @@ formatter     --> format_json()
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `model` | `str` | Ollama model name |
+| `provider` | `str` | Provider module name |
+| `allowed_providers` | `frozenset[str]` | Providers permitted to load |
+
+| `model` | `str` | Model identifier |
 | `ollama_endpoint` | `str` | Ollama API base URL |
 | `prompt_path` | `str` | Path to system prompt file |
 | `chat_directory` | `str` | Chat history directory |
 | `temperature` | `float` | Sampling temperature |
 | `request_timeout` | `int` | HTTP timeout in seconds |
+| `max_tokens` | `int` | Maximum output tokens |
+| `provider_options` | `dict[str, Any]` | Provider-specific configuration |
+
 
 ### `load_config(config_path="config.json") -> Config`
 
-Loads a `Config` from a JSON file.
+Loads a `Config` from a JSON file. Validates `provider` against `allowed_providers`.
 
 Raises `FileNotFoundError` if the file does not exist. Raises `KeyError` if a required field is missing.
+
+## `provider_client`
+
+### `load_provider(provider_name, allowed_providers) -> ProviderModule`
+
+Dynamically imports `<provider_name>_client.py` and validates it implements `create_client`, `preload`, `send_request`, and `extract_content`.
+
+Raises `ValueError` if `provider_name` is not in `allowed_providers` or is not a valid identifier. Raises `TypeError` if the imported module is missing a required function.
 
 ## `prompt_loader`
 
@@ -45,28 +64,26 @@ Reads and returns the stripped text content of a prompt file.
 
 Raises `FileNotFoundError` if the file does not exist.
 
-## `ollama_client`
+## Provider modules (`ollama_client`, `openai_client`, `anthropic_client`)
 
-### `preload_model(endpoint, model, timeout=120) -> None`
+Each provider module implements the same four functions:
 
-Sends an empty request to Ollama to load the model into memory (`keep_alive: -1`).
+### `create_client(config) -> Any`
 
-### `send_request(endpoint, model, system_prompt, messages, temperature=0.1, timeout=120) -> dict`
+Creates and returns the provider's SDK client (`None` for Ollama, which uses direct HTTP requests).
 
-Sends a chat completion request to Ollama. Returns the parsed JSON response.
+### `preload(config, client) -> None`
 
-| Param | Type | Description |
-|-------|------|-------------|
-| `endpoint` | `str` | Ollama base URL |
-| `model` | `str` | Model identifier |
-| `system_prompt` | `str` | System prompt text |
-| `messages` | `list[dict]` | Conversation messages with `role` and `content` |
-| `temperature` | `float` | Sampling temperature |
-| `timeout` | `int` | Request timeout in seconds |
+Performs provider-specific startup work. Ollama loads the model into memory; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`.
+
+### `send_request(config, client, system_prompt, messages) -> Any`
+
+Sends a chat request to the provider. Returns the raw provider response.
 
 ### `extract_content(response) -> str`
 
-Extracts the assistant message content from an Ollama response dict.
+Extracts the assistant's text content from a provider response.
+
 
 ## `chat_history`
 
