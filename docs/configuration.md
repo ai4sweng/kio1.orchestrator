@@ -12,6 +12,7 @@ All application settings are stored in `config.json` at the project root.
 | `chat_directory` | string | Directory for chat history files | `"chats"` |
 | `temperature` | float | Sampling temperature (lower = more deterministic) | `0.1` |
 | `request_timeout` | int | HTTP request timeout in seconds | `120` |
+| `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded) | `-1` |
 
 ## Example `config.json`
 
@@ -22,9 +23,17 @@ All application settings are stored in `config.json` at the project root.
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
     "temperature": 0.1,
-    "request_timeout": 120
+    "request_timeout": 120,
+    "keep_alive": -1
 }
 ```
+
+## Keeping Model Loaded
+
+Use `keep_alive` to reduce cold starts after launch.
+
+- `-1`: keep model loaded indefinitely (until Ollama restart or resource eviction)
+- `N > 0`: keep model loaded for `N` seconds between requests
 
 ## Changing the Model
 

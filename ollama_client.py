@@ -3,13 +3,19 @@ import urllib.request
 from typing import Any
 
 
-def preload_model(endpoint: str, model: str, timeout: int = 120) -> None:
+def preload_model(
+    endpoint: str,
+    model: str,
+    timeout: int = 120,
+    keep_alive: int = -1,
+) -> None:
     """Preload a model into Ollama's memory.
 
     Args:
         endpoint: The Ollama base URL.
         model: The model name to preload.
         timeout: Request timeout in seconds.
+        keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
 
     Returns:
         None.
@@ -18,7 +24,7 @@ def preload_model(endpoint: str, model: str, timeout: int = 120) -> None:
     payload = {
         "model": model,
         "messages": [],
-        "keep_alive": -1,
+        "keep_alive": keep_alive,
     }
 
     request_data = json.dumps(payload).encode("utf-8")
@@ -39,6 +45,7 @@ def send_request(
     messages: list[dict[str, str]],
     temperature: float = 0.1,
     timeout: int = 120,
+    keep_alive: int = -1,
 ) -> dict[str, Any]:
     """Send a chat completion request to the Ollama API.
 
@@ -63,7 +70,7 @@ def send_request(
         ],
         "stream": False,
         "format": "json",
-        "keep_alive": -1,
+        "keep_alive": keep_alive,
         "options": {
             "temperature": temperature,
         },

@@ -3,14 +3,14 @@
 ## Starting the Orchestrator
 
 ```bash
-source .venv/bin/activate
+venv
 python main.py
 ```
 
 On startup, the orchestrator:
 1. Loads configuration from `config.json`
 2. Reads the system prompt
-3. Preloads the model into Ollama's memory
+3. Preloads the model into Ollama's memory using configured `keep_alive`
 4. Creates a new chat session file
 5. Presents the interactive prompt
 
