@@ -1,7 +1,8 @@
 import os
-from typing import Any
+from typing import Any, cast
 
 from anthropic import Anthropic
+from anthropic.types import MessageParam
 
 from config_loader import Config
 
@@ -16,12 +17,10 @@ def create_client(config: Config) -> Anthropic:
         An Anthropic client.
     """
     api_key = os.getenv("ANTHROPIC_API_KEY")
-
     if not api_key or not api_key.strip():
         raise ValueError(
             "ANTHROPIC_API_KEY environment variable is required when using the Anthropic provider"
         )
-    
     return Anthropic(
         api_key=api_key,
         timeout=config.request_timeout,
@@ -53,7 +52,7 @@ def send_request(
     return client.messages.create(
         model=config.model,
         system=system_prompt,
-        messages=messages,
+        messages=cast(list[MessageParam], messages),
         temperature=config.temperature,
         max_tokens=config.max_tokens,
     )

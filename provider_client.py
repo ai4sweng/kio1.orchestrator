@@ -2,7 +2,7 @@ from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
 
-from config_loader import ALLOWED_PROVIDERS, Config
+from config_loader import Config
 
 
 class ProviderModule(Protocol):
@@ -31,18 +31,23 @@ class ProviderModule(Protocol):
         ...
 
 
-def load_provider(provider_name: str) -> ProviderModule:
+def load_provider(provider_name: str, allowed_providers: frozenset[str]) -> ProviderModule:
     """Dynamically load a provider module.
 
     A provider named ``openai`` is loaded from ``openai_client.py``.
 
     Args:
         provider_name: Provider name from configuration.
+        allowed_providers: Set of allowed provider names.
 
     Returns:
         A module implementing the provider interface.
     """
-    if not provider_name or not provider_name.isidentifier() or provider_name not in ALLOWED_PROVIDERS:
+    if (
+        not provider_name
+        or not provider_name.isidentifier()
+        or provider_name not in allowed_providers
+    ):
         raise ValueError(f"Invalid provider name: {provider_name!r}")
 
     module_name = f"{provider_name}_client"

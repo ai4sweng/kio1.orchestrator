@@ -1,8 +1,8 @@
 import os
-
-from typing import Any
+from typing import Any, cast
 
 from openai import OpenAI
+from openai.types.chat import ChatCompletionMessageParam
 
 from config_loader import Config
 
@@ -51,10 +51,10 @@ def send_request(
     """
     return client.chat.completions.create(
         model=config.model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            *messages
-        ],
+        messages=cast(
+            list[ChatCompletionMessageParam],
+            [{"role": "system", "content": system_prompt}, *messages],
+        ),
         temperature=config.temperature,
         max_tokens=config.max_tokens,
         response_format={"type": "json_object"},

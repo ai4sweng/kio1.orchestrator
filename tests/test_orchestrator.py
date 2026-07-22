@@ -1,48 +1,59 @@
 import json
-import tempfile
+from formatter import format_json
 from pathlib import Path
-from unittest.mock import patch, MagicMock
 from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
-from config_loader import Config, load_config
-from prompt_loader import load_prompt
+from anthropic_client import create_client as create_anthropic_client
+from anthropic_client import extract_content as extract_anthropic_content
+from anthropic_client import send_request as send_anthropic_request
 from chat_history import (
-    create_chat_file,
-    append_user_message,
     append_assistant_message,
+    append_user_message,
+    create_chat_file,
     load_messages,
 )
-from formatter import format_json
+from config_loader import Config, load_config
+from ollama_client import extract_content, preload, send_request
+from openai_client import create_client as create_openai_client
+from openai_client import extract_content as extract_openai_content
+from openai_client import send_request as send_openai_request
+from prompt_loader import load_prompt
 from provider_client import load_provider
-from ollama_client import send_request, extract_content, preload
-from openai_client import (
-    create_client as create_openai_client,
-    extract_content as extract_openai_content,
-    send_request as send_openai_request,
-)
-from anthropic_client import (
-    create_client as create_anthropic_client,
-    extract_content as extract_anthropic_content,
-    send_request as send_anthropic_request,
-)
 
 
 def make_config(
     provider: str = "ollama",
+    allowed_providers: frozenset[str] = frozenset({"ollama", "openai", "anthropic"}),
     model: str = "test-model",
     temperature: float = 0.1,
     request_timeout: float = 120,
     max_tokens: int = 1024,
     provider_options: dict[str, Any] | None = None,
 ) -> Config:
-    """Create a configuration for provider tests."""
+    """Create a configuration for provider tests.
+    
+    Args:
+        provider: Provider name to configure.
+        allowed_providers: Set of provider names permitted to load.
+        model: Model identifier.
+        temperature: Sampling temperature.
+        request_timeout: Request timeout in seconds.
+        max_tokens: Maximum number of generated output tokens.
+        provider_options: Optional provider-specific configuration; defaults
+            to an Ollama endpoint when not provided.
+
+    Returns:
+        A `Config` instance for use in tests.
+    """
     if provider_options is None:
         provider_options = {"endpoint": "http://localhost:11434"}
 
     return Config(
         provider=provider,
+        allowed_providers=allowed_providers,
         model=model,
         prompt_path="prompt.txt",
         chat_directory="chats",
@@ -67,6 +78,7 @@ class TestConfigLoader:
         """
         config_data = {
             "provider": "ollama",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
@@ -83,6 +95,7 @@ class TestConfigLoader:
         config = load_config(str(config_file))
 
         assert config.provider == "ollama"
+        assert config.allowed_providers == frozenset({"ollama", "openai", "anthropic"})
         assert config.model == "test-model"
         assert config.prompt_path == "prompts/test.txt"
         assert config.chat_directory == "chats"
@@ -90,7 +103,7 @@ class TestConfigLoader:
         assert config.request_timeout == 120
         assert config.max_tokens == 2048
         assert config.provider_options == {"custom_option": "custom-value"}
-        
+
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
         """Verify an unknown provider value raises a clear error.
 
@@ -102,6 +115,7 @@ class TestConfigLoader:
         """
         config_data = {
             "provider": "not_a_real_provider",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
@@ -115,7 +129,6 @@ class TestConfigLoader:
         with pytest.raises(ValueError, match="Unknown provider"):
             load_config(str(config_file))
 
-        
     def test_load_config_missing_file_raises(self) -> None:
         """Verify that a missing config file raises an error.
 
@@ -139,6 +152,7 @@ class TestConfigLoader:
         """
         config = Config(
             provider="test_provider",
+            allowed_providers=frozenset({"test_provider"}),
             model="m",
             prompt_path="p.txt",
             chat_directory="c",
@@ -382,9 +396,16 @@ class TestFormatter:
 
         assert '"key": "value"' in result
         assert '"num": 42' in result
-    
+
     def test_format_json_removes_markdown_fence(self) -> None:
-        """Verify fenced JSON is normalized before parsing."""
+        """Verify fenced JSON is normalized before parsing.
+        
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         raw = """```json
         {"key": "value", "num": 42}
         ```"""
@@ -392,7 +413,7 @@ class TestFormatter:
         result = format_json(raw)
 
         expected = '{\n  "key": "value",\n  "num": 42\n}'
-        assert result == expected    
+        assert result == expected
 
 
 class TestOllamaClient:
@@ -432,7 +453,9 @@ class TestOllamaClient:
         assert payload["messages"][1] == {"role": "user", "content": "test query"}
 
     @patch("ollama_client.urllib.request.urlopen")
-    def test_send_request_returns_parsed_response(self, mock_urlopen: MagicMock) -> None:
+    def test_send_request_returns_parsed_response(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         """Verify the response is parsed as JSON.
 
         Args:
@@ -495,7 +518,9 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        config = make_config(model="model", provider_options={"endpoint": "http://myhost:1234"})
+        config = make_config(
+            model="model", provider_options={"endpoint": "http://myhost:1234"}
+        )
         send_request(config, None, "sys", [])
 
         call_args = mock_urlopen.call_args[0][0]
@@ -525,7 +550,9 @@ class TestOllamaClient:
         assert mock_urlopen.call_args[1]["timeout"] == 60
 
     @patch("ollama_client.urllib.request.urlopen")
-    def test_send_request_passes_custom_temperature(self, mock_urlopen: MagicMock) -> None:
+    def test_send_request_passes_custom_temperature(
+        self, mock_urlopen: MagicMock
+    ) -> None:
         """Verify a custom `temperature` is included in the payload options.
 
         Args:
@@ -603,7 +630,9 @@ class TestOpenAIClient:
     """Tests for OpenAI client logic with mocked SDK calls."""
 
     @patch("openai_client.OpenAI")
-    def test_create_client_uses_api_key_and_timeout(self, mock_openai: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_create_client_uses_api_key_and_timeout(
+        self, mock_openai: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify OpenAI client is created with timeout.
 
         Args:
@@ -614,9 +643,10 @@ class TestOpenAIClient:
             None.
         """
         monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
-        config = make_config(provider="openai", request_timeout=12.0, provider_options={})
+        config = make_config(
+            provider="openai", request_timeout=12.0, provider_options={}
+        )
         create_openai_client(config)
-        
 
         mock_openai.assert_called_once_with(api_key="test-api-key", timeout=12.0)
 
@@ -677,7 +707,7 @@ class TestOpenAIClient:
             create_openai_client(config)
 
         mock_openai.assert_not_called()
-        
+
     def test_send_request_calls_chat_completions_create(self) -> None:
         """Verify OpenAI Chat Completions API call is correctly structured.
 
@@ -690,7 +720,9 @@ class TestOpenAIClient:
         client = MagicMock()
         messages = [{"role": "user", "content": "Build an app"}]
 
-        config = make_config(provider="openai", temperature=0.2, max_tokens=500, provider_options={})
+        config = make_config(
+            provider="openai", temperature=0.2, max_tokens=500, provider_options={}
+        )
         send_openai_request(
             config,
             client,
@@ -700,15 +732,12 @@ class TestOpenAIClient:
 
         client.chat.completions.create.assert_called_once_with(
             model="test-model",
-            messages=[
-                {"role": "system", "content": "system prompt"},
-                *messages
-            ],
+            messages=[{"role": "system", "content": "system prompt"}, *messages],
             temperature=0.2,
             max_tokens=500,
             response_format={
                 "type": "json_object",
-            }
+            },
         )
 
     def test_extract_openai_content_gets_message_content(self) -> None:
@@ -744,7 +773,9 @@ class TestAnthropicClient:
     """Tests for Anthropic client logic with mocked SDK calls."""
 
     @patch("anthropic_client.Anthropic")
-    def test_create_client_uses_api_key_and_timeout(self, mock_anthropic: MagicMock, monkeypatch: pytest.MonkeyPatch) -> None:
+    def test_create_client_uses_api_key_and_timeout(
+        self, mock_anthropic: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         """Verify Anthropic client is created with API key and timeout.
 
         Args:
@@ -755,7 +786,9 @@ class TestAnthropicClient:
             None.
         """
         monkeypatch.setenv("ANTHROPIC_API_KEY", "test-api-key")
-        config = make_config(provider="anthropic", request_timeout=12.0, provider_options={})
+        config = make_config(
+            provider="anthropic", request_timeout=12.0, provider_options={}
+        )
         create_anthropic_client(config)
 
         mock_anthropic.assert_called_once_with(api_key="test-api-key", timeout=12.0)
@@ -830,7 +863,9 @@ class TestAnthropicClient:
         client = MagicMock()
         messages = [{"role": "user", "content": "Build an app"}]
 
-        config = make_config(provider="anthropic", temperature=0.2, max_tokens=500, provider_options={})
+        config = make_config(
+            provider="anthropic", temperature=0.2, max_tokens=500, provider_options={}
+        )
         send_anthropic_request(
             config=config,
             client=client,
@@ -879,7 +914,8 @@ class TestAnthropicClient:
         response.content = [text_block]
 
         assert extract_anthropic_content(response) == '{"result": "ok"}'
-        
+
+
 class TestProviderLoading:
     """Tests for dynamic provider discovery."""
 
@@ -892,8 +928,15 @@ class TestProviderLoading:
         ],
     )
     def test_load_provider(self, provider_name: str) -> None:
-        """Verify configured provider modules load successfully."""
-        provider = load_provider(provider_name)
+        """Verify configured provider modules load successfully.
+        
+        Args:
+            provider_name: Name of the provider module to load.
+
+        Returns:
+            None.
+        """
+        provider = load_provider(provider_name, frozenset({"ollama", "openai", "anthropic"}))
 
         assert callable(provider.create_client)
         assert callable(provider.preload)
@@ -901,11 +944,38 @@ class TestProviderLoading:
         assert callable(provider.extract_content)
 
     def test_load_provider_rejects_invalid_name(self) -> None:
-        """Verify unsafe module names are rejected."""
+        """Verify unsafe module names are rejected.
+        
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         with pytest.raises(ValueError, match="Invalid provider name"):
-            load_provider("../openai")
+            load_provider("../openai", frozenset({"ollama", "openai", "anthropic"}))
 
     def test_load_provider_rejects_unknown_provider(self) -> None:
-        """Verify a provider outside the allowlist produces a useful error."""
+        """Verify a provider outside the allowlist produces a useful error.
+        
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
         with pytest.raises(ValueError, match="Invalid provider name"):
-            load_provider("missing_provider")
+            load_provider("missing_provider", frozenset({"ollama", "openai", "anthropic"}))
+    
+    def test_load_provider_respects_restricted_allowlist(self) -> None:
+        """Verify a provider excluded from the caller's allowlist is rejected.
+        
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        with pytest.raises(ValueError, match="Invalid provider name"):
+            load_provider("openai", frozenset({"ollama"}))
+

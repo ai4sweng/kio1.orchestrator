@@ -10,10 +10,11 @@
 ```bash
 git clone <repo-url>
 cd orchestrator
-python -m venv .venv
+make install
 source .venv/bin/activate
-pip install -r requirements.txt
 ```
+
+This creates a `.venv` virtual environment and installs all runtime and development dependencies.
 
 Pull the required model:
 
@@ -40,6 +41,13 @@ docs/                - Documentation
 ## Running Tests
 
 ```bash
+make test          # run full test suite
+make test-cov      # run with coverage report
+```
+
+Or directly:
+
+```bash
 pytest tests/ -v
 ```
 
@@ -62,15 +70,38 @@ System prompts live in `prompts/`. To iterate on a prompt:
 
 Keep previous versions for comparison and rollback.
 
+## Code Quality
+
+All tools are installed as part of `make install` and wired to `make` targets:
+
+| Target | Tool(s) | Purpose |
+| :--- | :--- | :--- |
+| `make format` | black, isort | Auto-format code and imports |
+| `make format-check` | black, isort | Verify formatting without changing files |
+| `make lint` | ruff | Fast linting and style checks |
+| `make typecheck` | mypy | Static type analysis |
+| `make check` | ruff + mypy | All static checks combined |
+| `make test` | pytest | Run test suite |
+| `make test-cov` | pytest-cov | Run tests with coverage report |
+| `make ci` | format + ruff + mypy + pytest | Full pipeline — run before pushing |
+| `make clean` | — | Remove caches and build artefacts |
+
+Run `make help` to see all targets.
+
 ## Dependencies
 
 The project intentionally minimizes external dependencies:
 
 - **Runtime**: Python standard library only (no `requests`, no `httpx`).
-- **Testing**: `pytest >= 7.0`.
+- **Testing**: `pytest >= 7.0`, `pytest-cov >= 4.0`.
+- **Formatting**: `black >= 24.0`, `isort >= 5.13`.
+- **Linting**: `ruff >= 0.4`.
+- **Type checking**: `mypy >= 1.10`.
 
 ## Code Style
 
 - Type annotations on all function signatures.
 - Docstrings in Google style with `Args:` and `Returns:` sections.
 - No classes except dataclasses for configuration.
+- Run `make format` before committing to apply consistent formatting.
+- Run `make ci` before opening a pull request.

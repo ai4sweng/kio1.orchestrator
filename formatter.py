@@ -5,6 +5,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+
 def format_json(raw_json: str) -> str:
     """Parse and pretty-print a JSON string.
 
@@ -27,7 +28,15 @@ def format_json(raw_json: str) -> str:
 
 
 def _strip_markdown_fence(content: str) -> str:
-    """Remove an optional Markdown code fence."""
+    """Remove an optional Markdown code fence.
+    
+    Args:
+    content: Raw text that may be wrapped in a Markdown code fence.
+
+    Returns:
+        The content with the surrounding code fence removed, if present;
+        otherwise the original stripped content unchanged.
+    """
     stripped_content = content.strip()
 
     if not stripped_content.startswith("```"):

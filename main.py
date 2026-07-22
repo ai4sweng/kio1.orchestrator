@@ -1,4 +1,5 @@
 import sys
+from formatter import format_json
 
 from chat_history import (
     append_assistant_message,
@@ -7,9 +8,8 @@ from chat_history import (
     load_messages,
 )
 from config_loader import load_config
-from formatter import format_json
-from provider_client import load_provider
 from prompt_loader import load_prompt
+from provider_client import load_provider
 
 
 def main() -> None:
@@ -24,9 +24,9 @@ def main() -> None:
     config = load_config()
     system_prompt = load_prompt(config.prompt_path)
 
-    provider = load_provider(config.provider)
+    provider = load_provider(config.provider, config.allowed_providers)
     client = provider.create_client(config)
-    
+
     print(f"Loading {config.provider} model {config.model}...")
     provider.preload(config, client)
 

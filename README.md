@@ -18,17 +18,17 @@ Providers are loaded dynamically from `<provider>_client.py`, keeping the main a
 
 ## Installation
 
-Create and activate a virtual environment:
-
 ```bash
-python3 -m venv .venv
+make install
 source .venv/bin/activate
 ```
 
-Install the dependencies:
+Or manually:
 
 ```bash
-python3 -m pip install --upgrade -r requirements.txt
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
 ## Configuration
@@ -212,20 +212,37 @@ pytest -q
 Run with detailed output:
 
 ```bash
+make test          # run test suite
+make test-cov      # run tests with coverage report
+```
+
+Or directly:
+
+```bash
 pytest tests/ -v
 ```
 
-Run syntax checks:
+## Code Quality
 
 ```bash
-python3 -m py_compile main.py config_loader.py provider_client.py ollama_client.py openai_client.py anthropic_client.py
+make format        # auto-format with black + isort
+make format-check  # verify black + isort formatting
+make lint          # ruff linter
+make typecheck     # mypy static analysis
+make check         # lint + typecheck together
+make ci            # full pipeline: format + check + test
 ```
 
-Check the patch for whitespace errors:
+See `make help` for all available targets.
 
-```bash
-git diff --check
-```
+## Documentation
+
+- [Architecture](docs/architecture.md) — System overview, components, and data flow
+- [Configuration](docs/configuration.md) — All config.json settings explained
+- [Usage Guide](docs/usage.md) — Interactive session examples and workflows
+- [API Reference](docs/api-reference.md) — Module and function documentation
+- [Chat History Format](docs/chat-history.md) — JSONL session file specification
+- [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
 
 ## Provider Architecture
 
@@ -269,10 +286,12 @@ anthropic_client.py  - Anthropic Messages API provider
 prompt_loader.py     - System-prompt loader
 chat_history.py      - JSONL conversation-history management
 formatter.py         - JSON normalization and pretty-printing
+Makefile             - Developer workflow targets
 requirements.txt     - Python dependencies
 prompts/             - KIO1 system prompts
-chats/               - Generated conversation histories
-tests/               - Automated tests
+chats/               - Generated conversation histories (auto-created)
+tests/               - Unit tests
+docs/                - Documentation
 ```
 
 ## Troubleshooting

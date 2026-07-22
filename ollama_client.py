@@ -4,8 +4,6 @@ from typing import Any
 
 from config_loader import Config
 
-# provider_options keys used: "endpoint" (required) — the base URL of the Ollama server.
-
 
 def create_client(config: Config) -> None:
     """Return None because Ollama uses direct HTTP requests."""
