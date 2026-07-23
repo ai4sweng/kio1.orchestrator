@@ -112,10 +112,10 @@ class TestConfigLoader:
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
         """Verify an unknown provider value raises a clear error
-        
+
         Args:
             tmp_path: Pytest temporary directory fixture.
-        
+
         Returns:
             None.
         """
