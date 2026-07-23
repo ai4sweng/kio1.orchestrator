@@ -30,7 +30,7 @@ def load_config(config_path: str = "config.json") -> Config:
     data: dict[str, Any] = json.loads(path.read_text())
 
     keep_alive = data.get("keep_alive", -1)
-    if not isinstance(keep_alive, int):
+    if type(keep_alive) is not int:
         raise ValueError("keep_alive must be an integer.")
 
     return Config(
