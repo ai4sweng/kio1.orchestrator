@@ -25,7 +25,7 @@ def preload(config: Config, client: Any) -> None:
     payload = {
         "model": config.model,
         "messages": [],
-        "keep_alive": -1,
+        "keep_alive": config.keep_alive,
     }
 
     request_data = json.dumps(payload).encode("utf-8")
@@ -67,7 +67,7 @@ def send_request(
         ],
         "stream": False,
         "format": "json",
-        "keep_alive": -1,
+        "keep_alive": config.keep_alive,
         "options": {
             "temperature": config.temperature,
         },

@@ -6,8 +6,9 @@
     "chat_directory": "chats",
     "temperature": 0.2,
     "request_timeout": 120,
+    "keep_alive": -1,
     "max_tokens": 4096,
     "provider_options": {
         "endpoint": "http://localhost:11434"
-    }
+    } 
 }

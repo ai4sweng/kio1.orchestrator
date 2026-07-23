@@ -36,9 +36,9 @@ formatter     --> format_json()
 | `chat_directory` | `str` | Chat history directory |
 | `temperature` | `float` | Sampling temperature |
 | `request_timeout` | `float` | HTTP timeout in seconds |
+| `keep_alive` | `int` | Ollama residency control (`-1` keeps loaded) |
 | `max_tokens` | `int` | Maximum output tokens |
 | `provider_options` | `dict[str, Any]` | Provider-specific configuration |
-
 
 ### `load_config(config_path="config.json") -> Config`
 

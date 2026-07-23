@@ -10,7 +10,7 @@ python main.py
 On startup, the orchestrator:
 1. Loads configuration from `config.json`
 2. Reads the system prompt
-3. Initializes the configured provider (e.g. preloads the model for Ollama)
+3. Initializes the configured provider (e.g. preloads the model for Ollama using configured `keep_alive`)
 4. Creates a new chat session file
 5. Presents the interactive prompt
 

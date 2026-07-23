@@ -32,6 +32,7 @@ def make_config(
     model: str = "test-model",
     temperature: float = 0.1,
     request_timeout: float = 120,
+    keep_alive: int = -1,
     max_tokens: int = 1024,
     provider_options: dict[str, Any] | None = None,
 ) -> Config:
@@ -43,6 +44,7 @@ def make_config(
         model: Model identifier.
         temperature: Sampling temperature.
         request_timeout: Request timeout in seconds.
+        keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
         max_tokens: Maximum number of generated output tokens.
         provider_options: Optional provider-specific configuration; defaults
             to an Ollama endpoint when not provided.
@@ -61,6 +63,7 @@ def make_config(
         chat_directory="chats",
         temperature=temperature,
         request_timeout=request_timeout,
+        keep_alive=keep_alive,
         max_tokens=max_tokens,
         provider_options=provider_options,
     )
@@ -103,11 +106,43 @@ class TestConfigLoader:
         assert config.chat_directory == "chats"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
+        assert config.keep_alive == -1
         assert config.max_tokens == 2048
         assert config.provider_options == {"custom_option": "custom-value"}
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
-        """Verify an unknown provider value raises a clear error.
+        """Verify an unknown provider value raises a clear error
+        
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        
+        Returns:
+            None.
+        """
+        config_data = {
+            "provider": "unknown_provider",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "keep_alive": -1,
+            "request_timeout": 120,
+            "max_tokens": 2048,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="Unknown provider"):
+            load_config(str(config_file))
+
+    def test_load_config_reads_optional_ollama_runtime_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify optional Ollama runtime config fields are loaded.
 
         Args:
             tmp_path: Pytest temporary directory fixture.
@@ -116,19 +151,55 @@ class TestConfigLoader:
             None.
         """
         config_data = {
-            "provider": "not_a_real_provider",
+            "provider": "ollama",
             "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
+            "keep_alive": 600,
             "max_tokens": 2048,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
         }
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
 
-        with pytest.raises(ValueError, match="Unknown provider"):
+        config = load_config(str(config_file))
+
+        assert config.keep_alive == 600
+
+    @pytest.mark.parametrize("invalid_keep_alive", [True, False, 1.5, "600", None])
+    def test_load_config_rejects_non_integer_keep_alive(
+        self, tmp_path: Path, invalid_keep_alive: object
+    ) -> None:
+        """Verify non-integer keep_alive values are rejected.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        config_data = {
+            "provider": "ollama",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "keep_alive": invalid_keep_alive,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="keep_alive must be an integer"):
             load_config(str(config_file))
 
     def test_load_config_missing_file_raises(self) -> None:
@@ -160,6 +231,7 @@ class TestConfigLoader:
             chat_directory="c",
             temperature=0.1,
             request_timeout=120,
+            keep_alive=-1,
             max_tokens=2048,
             provider_options={"example": True},
         )
@@ -167,6 +239,7 @@ class TestConfigLoader:
         assert config.model == "m"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
+        assert config.keep_alive == -1
         assert config.max_tokens == 2048
         assert config.provider_options == {"example": True}
 
@@ -577,6 +650,33 @@ class TestOllamaClient:
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
         assert payload["options"]["temperature"] == 0.5
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_passes_custom_keep_alive(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify custom keep_alive value is included in payload.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="model", keep_alive=600)
+        send_request(config, None, "sys", [])
+
+        call_args = mock_urlopen.call_args[0][0]
+        payload = json.loads(call_args.data.decode("utf-8"))
+        assert payload["keep_alive"] == 600
 
     @patch("ollama_client.urllib.request.urlopen")
     def test_preload_model_sends_correct_payload(self, mock_urlopen: MagicMock) -> None:

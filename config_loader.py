@@ -15,6 +15,7 @@ class Config:
     chat_directory: str
     temperature: float
     request_timeout: float
+    keep_alive: int
     max_tokens: int
     provider_options: dict[str, Any] = field(default_factory=dict)
 
@@ -29,7 +30,7 @@ def load_config(config_path: str = "config.json") -> Config:
         A `Config` instance populated from the file.
     """
     path = Path(config_path)
-    data = json.loads(path.read_text())
+    data: dict[str, Any] = json.loads(path.read_text())
 
     provider_options = data.get("provider_options", {})
 
@@ -40,6 +41,10 @@ def load_config(config_path: str = "config.json") -> Config:
     if data["provider"] not in allowed_providers:
         raise ValueError(f"Unknown provider: {data['provider']!r}")
 
+    keep_alive = data.get("keep_alive", -1)
+    if type(keep_alive) is not int:
+        raise ValueError("keep_alive must be an integer.")
+
     return Config(
         provider=data["provider"],
         allowed_providers=allowed_providers,
@@ -48,6 +53,7 @@ def load_config(config_path: str = "config.json") -> Config:
         chat_directory=data["chat_directory"],
         temperature=data["temperature"],
         request_timeout=data["request_timeout"],
+        keep_alive=keep_alive,
         max_tokens=data["max_tokens"],
         provider_options=provider_options,
     )

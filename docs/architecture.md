@@ -53,5 +53,5 @@ graph TD
 
 - **No external HTTP library**: Uses `urllib.request` from the standard library to minimize dependencies.
 - **JSONL chat storage**: Each message is a single JSON line, enabling append-only writes and simple streaming reads.
-- **Model preloading**: The model is loaded into Ollama memory at startup with `keep_alive: -1` (indefinite) to eliminate cold-start latency on the first query.
+- **Model preloading**: The model is loaded into Ollama memory at startup using configured `keep_alive` to reduce cold-start latency.
 - **JSON-forced output**: The Ollama request includes `"format": "json"` to guarantee structured responses from the model.

@@ -13,10 +13,9 @@ All application settings are stored in `config.json` at the project root.
 | `chat_directory` | string | Directory for chat history files |
 | `temperature` | float | Sampling temperature (lower = more deterministic) |
 | `request_timeout` | float | Request timeout in seconds |
+| `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded) | `-1` |
 | `max_tokens` | int | Maximum number of generated output tokens; does not limit input context |
 | `provider_options` | object | Optional provider-specific configuration (e.g. Ollama's `endpoint`) |
-
-## Ollama
 
 ## Example `config.json`
 
@@ -29,13 +28,22 @@ All application settings are stored in `config.json` at the project root.
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
+        "keep_alive": -1,
         "provider_options": {
         "endpoint": "http://localhost:11434"
     }
 }
 ```
 
-### Changing the Model
+
+## Keeping Model Loaded
+
+Use `keep_alive` to reduce cold starts after launch.
+
+- `-1`: keep model loaded indefinitely (until Ollama restart or resource eviction)
+- `N > 0`: keep model loaded for `N` seconds between requests
+
+## Changing the Model
 
 To use a different Ollama model:
 
