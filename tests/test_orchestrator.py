@@ -1,10 +1,15 @@
 import json
 from formatter import format_json
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from anthropic_client import create_client as create_anthropic_client
+from anthropic_client import extract_content as extract_anthropic_content
+from anthropic_client import preload as preload_anthropic
+from anthropic_client import send_request as send_anthropic_request
 from chat_history import (
     append_assistant_message,
     append_user_message,
@@ -12,8 +17,56 @@ from chat_history import (
     load_messages,
 )
 from config_loader import Config, load_config
-from ollama_client import extract_content, preload_model, send_request
+from ollama_client import extract_content, preload, send_request
+from openai_client import create_client as create_openai_client
+from openai_client import extract_content as extract_openai_content
+from openai_client import preload as preload_openai
+from openai_client import send_request as send_openai_request
 from prompt_loader import load_prompt
+from provider_client import load_provider
+
+
+def make_config(
+    provider: str = "ollama",
+    allowed_providers: frozenset[str] = frozenset({"ollama", "openai", "anthropic"}),
+    model: str = "test-model",
+    temperature: float = 0.1,
+    request_timeout: float = 120,
+    keep_alive: int = -1,
+    max_tokens: int = 1024,
+    provider_options: dict[str, Any] | None = None,
+) -> Config:
+    """Create a configuration for provider tests.
+
+    Args:
+        provider: Provider name to configure.
+        allowed_providers: Set of provider names permitted to load.
+        model: Model identifier.
+        temperature: Sampling temperature.
+        request_timeout: Request timeout in seconds.
+        keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
+        max_tokens: Maximum number of generated output tokens.
+        provider_options: Optional provider-specific configuration; defaults
+            to an Ollama endpoint when not provided.
+
+    Returns:
+        A `Config` instance for use in tests.
+    """
+    if provider_options is None:
+        provider_options = {"endpoint": "http://localhost:11434"}
+
+    return Config(
+        provider=provider,
+        allowed_providers=allowed_providers,
+        model=model,
+        prompt_path="prompt.txt",
+        chat_directory="chats",
+        temperature=temperature,
+        request_timeout=request_timeout,
+        keep_alive=keep_alive,
+        max_tokens=max_tokens,
+        provider_options=provider_options,
+    )
 
 
 class TestConfigLoader:
@@ -29,25 +82,62 @@ class TestConfigLoader:
             None.
         """
         config_data = {
+            "provider": "ollama",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
-            "ollama_endpoint": "http://localhost:11434",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
+            "max_tokens": 2048,
+            "provider_options": {
+                "custom_option": "custom-value",
+            },
         }
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
 
         config = load_config(str(config_file))
 
+        assert config.provider == "ollama"
+        assert config.allowed_providers == frozenset({"ollama", "openai", "anthropic"})
         assert config.model == "test-model"
-        assert config.ollama_endpoint == "http://localhost:11434"
         assert config.prompt_path == "prompts/test.txt"
         assert config.chat_directory == "chats"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
+        assert config.max_tokens == 2048
+        assert config.provider_options == {"custom_option": "custom-value"}
+
+    def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
+        """Verify an unknown provider value raises a clear error
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        config_data = {
+            "provider": "unknown_provider",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "keep_alive": -1,
+            "request_timeout": 120,
+            "max_tokens": 2048,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="Unknown provider"):
+            load_config(str(config_file))
 
     def test_load_config_reads_optional_ollama_runtime_fields(
         self, tmp_path: Path
@@ -61,13 +151,18 @@ class TestConfigLoader:
             None.
         """
         config_data = {
+            "provider": "ollama",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
-            "ollama_endpoint": "http://localhost:11434",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
             "keep_alive": 600,
+            "max_tokens": 2048,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
         }
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
@@ -89,13 +184,17 @@ class TestConfigLoader:
             None.
         """
         config_data = {
+            "provider": "ollama",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
             "model": "test-model",
-            "ollama_endpoint": "http://localhost:11434",
             "prompt_path": "prompts/test.txt",
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
             "keep_alive": invalid_keep_alive,
+            "provider_options": {
+                "endpoint": "http://localhost:11434",
+            },
         }
         config_file = tmp_path / "config.json"
         config_file.write_text(json.dumps(config_data))
@@ -125,19 +224,24 @@ class TestConfigLoader:
             None.
         """
         config = Config(
+            provider="test_provider",
+            allowed_providers=frozenset({"test_provider"}),
             model="m",
-            ollama_endpoint="http://localhost",
             prompt_path="p.txt",
             chat_directory="c",
             temperature=0.1,
             request_timeout=120,
             keep_alive=-1,
+            max_tokens=2048,
+            provider_options={"example": True},
         )
+        assert config.provider == "test_provider"
         assert config.model == "m"
-        assert config.ollama_endpoint == "http://localhost"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
+        assert config.max_tokens == 2048
+        assert config.provider_options == {"example": True}
 
 
 class TestPromptLoader:
@@ -368,6 +472,24 @@ class TestFormatter:
         assert '"key": "value"' in result
         assert '"num": 42' in result
 
+    def test_format_json_removes_markdown_fence(self) -> None:
+        """Verify fenced JSON is normalized before parsing.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        raw = """```json
+        {"key": "value", "num": 42}
+        ```"""
+
+        result = format_json(raw)
+
+        expected = '{\n  "key": "value",\n  "num": 42\n}'
+        assert result == expected
+
 
 class TestOllamaClient:
     """Tests for Ollama client logic with mocked HTTP."""
@@ -391,7 +513,8 @@ class TestOllamaClient:
         mock_urlopen.return_value = mock_response
 
         messages = [{"role": "user", "content": "test query"}]
-        send_request("http://localhost:11434", "test-model", "system", messages)
+        config = make_config(model="test-model")
+        send_request(config, None, "system", messages)
 
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
@@ -423,7 +546,8 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        result = send_request("http://localhost:11434", "model", "sys", [])
+        config = make_config(model="model")
+        result = send_request(config, None, "sys", [])
 
         assert result == expected
 
@@ -469,7 +593,10 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        send_request("http://myhost:1234", "model", "sys", [])
+        config = make_config(
+            model="model", provider_options={"endpoint": "http://myhost:1234"}
+        )
+        send_request(config, None, "sys", [])
 
         call_args = mock_urlopen.call_args[0][0]
         assert call_args.full_url == "http://myhost:1234/api/chat"
@@ -492,7 +619,8 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        send_request("http://localhost:11434", "model", "sys", [], timeout=60)
+        config = make_config(model="model", request_timeout=60)
+        send_request(config, None, "sys", [])
 
         assert mock_urlopen.call_args[1]["timeout"] == 60
 
@@ -516,7 +644,8 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        send_request("http://localhost:11434", "model", "sys", [], temperature=0.5)
+        config = make_config(model="model", temperature=0.5)
+        send_request(config, None, "sys", [])
 
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
@@ -542,7 +671,8 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        send_request("http://localhost:11434", "model", "sys", [], keep_alive=600)
+        config = make_config(model="model", keep_alive=600)
+        send_request(config, None, "sys", [])
 
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
@@ -564,7 +694,8 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        preload_model("http://localhost:11434", "test-model")
+        config = make_config(model="test-model")
+        preload(config, None)
 
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
@@ -590,6 +721,418 @@ class TestOllamaClient:
         mock_response.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_response
 
-        preload_model("http://localhost:11434", "model", timeout=30)
+        config = make_config(model="model", request_timeout=30)
+        preload(config, None)
 
         assert mock_urlopen.call_args[1]["timeout"] == 30
+
+
+class TestOpenAIClient:
+    """Tests for OpenAI client logic with mocked SDK calls."""
+
+    @patch("openai_client.OpenAI")
+    def test_create_client_uses_api_key_and_timeout(
+        self, mock_openai: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify OpenAI client is created with timeout.
+
+        Args:
+            mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv("OPENAI_API_KEY", "test-api-key")
+        config = make_config(
+            provider="openai", request_timeout=12.0, provider_options={}
+        )
+        create_openai_client(config)
+
+        mock_openai.assert_called_once_with(api_key="test-api-key", timeout=12.0)
+
+    @patch("openai_client.OpenAI")
+    def test_create_client_rejects_missing_api_key(
+        self,
+        mock_openai: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a clear error is raised when the API key is missing.
+
+        Args:
+            mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.delenv(
+            "OPENAI_API_KEY",
+            raising=False,
+        )
+        config = make_config(
+            provider="openai",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            create_openai_client(config)
+
+        mock_openai.assert_not_called()
+
+    @patch("openai_client.OpenAI")
+    def test_create_client_rejects_blank_api_key(
+        self,
+        mock_openai: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a whitespace-only API key is rejected.
+
+        Args:
+            mock_openai: Mock for `openai_client.OpenAI`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv(
+            "OPENAI_API_KEY",
+            "   ",
+        )
+        config = make_config(
+            provider="openai",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="OPENAI_API_KEY"):
+            create_openai_client(config)
+
+        mock_openai.assert_not_called()
+
+    def test_send_request_calls_chat_completions_create(self) -> None:
+        """Verify OpenAI Chat Completions API call is correctly structured.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        messages = [{"role": "user", "content": "Build an app"}]
+
+        config = make_config(
+            provider="openai", temperature=0.2, max_tokens=500, provider_options={}
+        )
+        send_openai_request(
+            config,
+            client,
+            "system prompt",
+            messages,
+        )
+
+        client.chat.completions.create.assert_called_once_with(
+            model="test-model",
+            messages=[{"role": "system", "content": "system prompt"}, *messages],
+            temperature=0.2,
+            response_format={
+                "type": "json_object",
+            },
+        )
+
+    def test_extract_openai_content_gets_message_content(self) -> None:
+        """Verify content extraction from OpenAI response object.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        response = MagicMock()
+        response.choices[0].message.content = '{"result": "ok"}'
+
+        assert extract_openai_content(response) == '{"result": "ok"}'
+
+    def test_extract_openai_content_strips_whitespace(self) -> None:
+        """Verify content extraction strips leading/trailing whitespace.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        response = MagicMock()
+        response.choices[0].message.content = '  {"result": "ok"}  \n'
+
+        assert extract_openai_content(response) == '{"result": "ok"}'
+
+    def test_preload_verifies_model_exists(self) -> None:
+        """Verify preload retrieves the model to validate it exists.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        config = make_config(provider="openai", model="gpt-4o-mini")
+
+        preload_openai(config, client)
+
+        client.models.retrieve.assert_called_once_with("gpt-4o-mini")
+
+
+class TestAnthropicClient:
+    """Tests for Anthropic client logic with mocked SDK calls."""
+
+    @patch("anthropic_client.Anthropic")
+    def test_create_client_uses_api_key_and_timeout(
+        self, mock_anthropic: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify Anthropic client is created with API key and timeout.
+
+        Args:
+            mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest monkeypatch fixture to set environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv("ANTHROPIC_API_KEY", "test-api-key")
+        config = make_config(
+            provider="anthropic", request_timeout=12.0, provider_options={}
+        )
+        create_anthropic_client(config)
+
+        mock_anthropic.assert_called_once_with(api_key="test-api-key", timeout=12.0)
+
+    @patch("anthropic_client.Anthropic")
+    def test_create_client_rejects_missing_api_key(
+        self,
+        mock_anthropic: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a clear error is raised when the API key is missing.
+
+        Args:
+            mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.delenv(
+            "ANTHROPIC_API_KEY",
+            raising=False,
+        )
+        config = make_config(
+            provider="anthropic",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            create_anthropic_client(config)
+
+        mock_anthropic.assert_not_called()
+
+    @patch("anthropic_client.Anthropic")
+    def test_create_client_rejects_blank_api_key(
+        self,
+        mock_anthropic: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify a whitespace-only API key is rejected.
+
+        Args:
+            mock_anthropic: Mock for `anthropic_client.Anthropic`.
+            monkeypatch: Pytest fixture for modifying environment variables.
+
+        Returns:
+            None.
+        """
+        monkeypatch.setenv(
+            "ANTHROPIC_API_KEY",
+            "   ",
+        )
+        config = make_config(
+            provider="anthropic",
+            provider_options={},
+        )
+
+        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY"):
+            create_anthropic_client(config)
+
+        mock_anthropic.assert_not_called()
+
+    def test_send_request_calls_messages_create(self) -> None:
+        """Verify Anthropic Messages API call is correctly structured.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        messages = [{"role": "user", "content": "Build an app"}]
+
+        config = make_config(
+            provider="anthropic", temperature=0.2, max_tokens=500, provider_options={}
+        )
+        send_anthropic_request(
+            config=config,
+            client=client,
+            system_prompt="system prompt",
+            messages=messages,
+        )
+
+        client.messages.create.assert_called_once_with(
+            model="test-model",
+            system="system prompt",
+            messages=messages,
+            temperature=0.2,
+            max_tokens=500,
+        )
+
+    def test_send_request_omits_temperature_for_unsupported_model(self) -> None:
+        """Verify temperature is omitted for models that reject a custom value.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        messages = [{"role": "user", "content": "Build an app"}]
+
+        config = make_config(provider="anthropic", model="claude-opus-4-8")
+        send_anthropic_request(config, client, "system prompt", messages)
+
+        client.messages.create.assert_called_once_with(
+            model="claude-opus-4-8",
+            system="system prompt",
+            messages=messages,
+            max_tokens=1024,
+        )
+
+    def test_extract_anthropic_content_gets_text_blocks(self) -> None:
+        """Verify content extraction from Anthropic text blocks.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = '{"result": "ok"}'
+        response = MagicMock()
+        response.content = [text_block]
+
+        assert extract_anthropic_content(response) == '{"result": "ok"}'
+
+    def test_extract_anthropic_content_strips_whitespace(self) -> None:
+        """Verify content extraction strips leading/trailing whitespace.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = '  {"result": "ok"}  \n'
+        response = MagicMock()
+        response.content = [text_block]
+
+        assert extract_anthropic_content(response) == '{"result": "ok"}'
+
+    def test_preload_verifies_model_exists(self) -> None:
+        """Verify preload retrieves the model to validate it exists.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        client = MagicMock()
+        config = make_config(provider="anthropic", model="claude-haiku-4-5")
+
+        preload_anthropic(config, client)
+
+        client.models.retrieve.assert_called_once_with("claude-haiku-4-5")
+
+
+class TestProviderLoading:
+    """Tests for dynamic provider discovery."""
+
+    @pytest.mark.parametrize(
+        "provider_name",
+        [
+            "ollama",
+            "openai",
+            "anthropic",
+        ],
+    )
+    def test_load_provider(self, provider_name: str) -> None:
+        """Verify configured provider modules load successfully.
+
+        Args:
+            provider_name: Name of the provider module to load.
+
+        Returns:
+            None.
+        """
+        provider = load_provider(
+            provider_name, frozenset({"ollama", "openai", "anthropic"})
+        )
+
+        assert callable(provider.create_client)
+        assert callable(provider.preload)
+        assert callable(provider.send_request)
+        assert callable(provider.extract_content)
+
+    def test_load_provider_rejects_invalid_name(self) -> None:
+        """Verify unsafe module names are rejected.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        with pytest.raises(ValueError, match="Invalid provider name"):
+            load_provider("../openai", frozenset({"ollama", "openai", "anthropic"}))
+
+    def test_load_provider_rejects_unknown_provider(self) -> None:
+        """Verify a provider outside the allowlist produces a useful error.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        with pytest.raises(ValueError, match="Invalid provider name"):
+            load_provider(
+                "missing_provider", frozenset({"ollama", "openai", "anthropic"})
+            )
+
+    def test_load_provider_respects_restricted_allowlist(self) -> None:
+        """Verify a provider excluded from the caller's allowlist is rejected.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        with pytest.raises(ValueError, match="Invalid provider name"):
+            load_provider("openai", frozenset({"ollama"}))

@@ -1,5 +1,6 @@
 # Runtime dependencies
-# (none — stdlib only)
+openai>=1.66.0
+anthropic>=0.18.1
 
 # Testing
 pytest>=7.0

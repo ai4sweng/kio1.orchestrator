@@ -1,20 +1,20 @@
 # KIO1: Orchestrator
 
-A terminal application that sends user queries to a local Ollama instance and returns structured JSON workflow plans.
+A terminal application that turns software-development requests into structured JSON workflow plans.
 
-## Prerequisites
+KIO1 supports multiple model providers:
 
-Install Ollama:
+- Ollama
+- OpenAI
+- Anthropic
 
-```bash
-curl -fsSL https://ollama.com/install.sh | sh
-```
+Providers are loaded dynamically from `<provider>_client.py`, keeping the main application and configuration loader provider-neutral.
 
-Pull the required model:
+## Requirements
 
-```bash
-ollama pull ministral-3:8b
-```
+- Python 3.10 or newer
+- An Ollama installation, OpenAI API key, or Anthropic API key
+- Access to the model configured in `config.json`
 
 ## Installation
 
@@ -31,49 +31,27 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Environment Setup
+Further information about the project is available in the docs folder
 
-Activate the virtual environment before running:
+## Configuration
 
-```bash
-source .venv/bin/activate
-```
-
-Ensure the Ollama service is running (`ollama serve` or via systemd).
+The active provider and model are selected in `config.json`. API keys are read from environment variables, never from `config.json` itself. See [Configuration](docs/configuration.md) for the full field reference and per-provider setup.
 
 ## Usage
 
 ```bash
-python main.py
+python3 main.py
 ```
 
-Type your request at the prompt. The orchestrator will return a JSON workflow plan. Type `exit` or press `Ctrl+C` to quit.
+See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
 ## Running Tests
 
 ```bash
-make test          # run test suite
-make test-cov      # run tests with coverage report
+pytest -q
 ```
 
-Or directly:
-
-```bash
-pytest tests/ -v
-```
-
-## Code Quality
-
-```bash
-make format        # auto-format with black + isort
-make format-check  # verify black + isort formatting
-make lint          # ruff linter
-make typecheck     # mypy static analysis
-make check         # lint + typecheck together
-make ci            # full pipeline: format + check + test
-```
-
-See `make help` for all available targets.
+See [Development Guide](docs/development.md) for the full test, lint, and format workflow.
 
 ## Documentation
 
@@ -83,21 +61,4 @@ See `make help` for all available targets.
 - [API Reference](docs/api-reference.md) — Module and function documentation
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification
 - [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
-
-## Project Structure
-
-```
-config.json          - Application configuration
-main.py              - Entry point
-config_loader.py     - Configuration loading
-prompt_loader.py     - System prompt loading
-ollama_client.py     - Ollama HTTP client
-chat_history.py      - Conversation history management
-formatter.py         - JSON pretty-printing
-Makefile             - Developer workflow targets
-requirements.txt     - Runtime + dev dependencies
-prompts/             - System prompt files
-chats/               - Conversation history files (auto-created)
-tests/               - Unit tests
-docs/                - Documentation
-```
+- [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them

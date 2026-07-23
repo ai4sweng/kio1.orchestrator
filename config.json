@@ -1,9 +1,14 @@
 {
+    "provider": "ollama",
+    "allowed_providers": ["ollama", "openai", "anthropic"],
     "model": "ministral-3:8b",
-    "ollama_endpoint": "http://localhost:11434",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
-    "temperature": 0.1,
+    "temperature": 0.2,
     "request_timeout": 120,
-    "keep_alive": -1
+    "keep_alive": -1,
+    "max_tokens": 4096,
+    "provider_options": {
+        "endpoint": "http://localhost:11434"
+    } 
 }
