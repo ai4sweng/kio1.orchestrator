@@ -31,13 +31,11 @@ formatter     --> format_json()
 |-------|------|-------------|
 | `provider` | `str` | Provider module name |
 | `allowed_providers` | `frozenset[str]` | Providers permitted to load |
-
 | `model` | `str` | Model identifier |
-| `ollama_endpoint` | `str` | Ollama API base URL |
 | `prompt_path` | `str` | Path to system prompt file |
 | `chat_directory` | `str` | Chat history directory |
 | `temperature` | `float` | Sampling temperature |
-| `request_timeout` | `int` | HTTP timeout in seconds |
+| `request_timeout` | `float` | HTTP timeout in seconds |
 | `max_tokens` | `int` | Maximum output tokens |
 | `provider_options` | `dict[str, Any]` | Provider-specific configuration |
 

@@ -22,8 +22,9 @@ All application settings are stored in `config.json` at the project root.
 
 ```json
 {
+    "provider": "ollama",
+    "allowed_providers": ["ollama", "openai", "anthropic"],
     "model": "ministral-3:8b",
-    "ollama_endpoint": "http://localhost:11434",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
     "temperature": 0.1,
