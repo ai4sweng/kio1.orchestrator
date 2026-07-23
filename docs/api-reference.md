@@ -30,6 +30,7 @@ formatter     --> format_json()
 | `chat_directory` | `str` | Chat history directory |
 | `temperature` | `float` | Sampling temperature |
 | `request_timeout` | `int` | HTTP timeout in seconds |
+| `keep_alive` | `int` | Ollama residency control (`-1` keeps loaded) |
 
 ### `load_config(config_path="config.json") -> Config`
 
@@ -47,11 +48,11 @@ Raises `FileNotFoundError` if the file does not exist.
 
 ## `ollama_client`
 
-### `preload_model(endpoint, model, timeout=120) -> None`
+### `preload_model(endpoint, model, timeout=120, keep_alive=-1) -> None`
 
-Sends an empty request to Ollama to load the model into memory (`keep_alive: -1`).
+Sends an empty request to Ollama to load the model into memory with configured `keep_alive`.
 
-### `send_request(endpoint, model, system_prompt, messages, temperature=0.1, timeout=120) -> dict`
+### `send_request(endpoint, model, system_prompt, messages, temperature=0.1, timeout=120, keep_alive=-1) -> dict`
 
 Sends a chat completion request to Ollama. Returns the parsed JSON response.
 
@@ -63,6 +64,7 @@ Sends a chat completion request to Ollama. Returns the parsed JSON response.
 | `messages` | `list[dict]` | Conversation messages with `role` and `content` |
 | `temperature` | `float` | Sampling temperature |
 | `timeout` | `int` | Request timeout in seconds |
+| `keep_alive` | `int` | Ollama residency control value |
 
 ### `extract_content(response) -> str`
 

@@ -34,7 +34,7 @@ graph TD
 ## Data Flow
 
 1. On startup, configuration and system prompt are loaded.
-2. The configured model is preloaded into Ollama's memory (`keep_alive: -1`).
+2. The configured model is preloaded into Ollama's memory (`keep_alive` from config).
 3. A new JSONL chat file is created for the session.
 4. The REPL loop reads user input, loads prior messages from the chat file, sends the full conversation to Ollama, and displays the formatted JSON workflow plan.
 5. Both user and assistant messages are appended to the chat file after each exchange.
@@ -43,5 +43,5 @@ graph TD
 
 - **No external HTTP library**: Uses `urllib.request` from the standard library to minimize dependencies.
 - **JSONL chat storage**: Each message is a single JSON line, enabling append-only writes and simple streaming reads.
-- **Model preloading**: The model is loaded into Ollama memory at startup with `keep_alive: -1` (indefinite) to eliminate cold-start latency on the first query.
+- **Model preloading**: The model is loaded into Ollama memory at startup using configured `keep_alive` to reduce cold-start latency.
 - **JSON-forced output**: The Ollama request includes `"format": "json"` to guarantee structured responses from the model.

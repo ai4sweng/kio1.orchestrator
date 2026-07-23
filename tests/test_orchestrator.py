@@ -47,6 +47,61 @@ class TestConfigLoader:
         assert config.chat_directory == "chats"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
+        assert config.keep_alive == -1
+
+    def test_load_config_reads_optional_ollama_runtime_fields(
+        self, tmp_path: Path
+    ) -> None:
+        """Verify optional Ollama runtime config fields are loaded.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        config_data = {
+            "model": "test-model",
+            "ollama_endpoint": "http://localhost:11434",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "keep_alive": 600,
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        config = load_config(str(config_file))
+
+        assert config.keep_alive == 600
+
+    @pytest.mark.parametrize("invalid_keep_alive", [True, False, 1.5, "600", None])
+    def test_load_config_rejects_non_integer_keep_alive(
+        self, tmp_path: Path, invalid_keep_alive: object
+    ) -> None:
+        """Verify non-integer keep_alive values are rejected.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+
+        Returns:
+            None.
+        """
+        config_data = {
+            "model": "test-model",
+            "ollama_endpoint": "http://localhost:11434",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "keep_alive": invalid_keep_alive,
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        with pytest.raises(ValueError, match="keep_alive must be an integer"):
+            load_config(str(config_file))
 
     def test_load_config_missing_file_raises(self) -> None:
         """Verify that a missing config file raises an error.
@@ -76,11 +131,13 @@ class TestConfigLoader:
             chat_directory="c",
             temperature=0.1,
             request_timeout=120,
+            keep_alive=-1,
         )
         assert config.model == "m"
         assert config.ollama_endpoint == "http://localhost"
         assert config.temperature == 0.1
         assert config.request_timeout == 120
+        assert config.keep_alive == -1
 
 
 class TestPromptLoader:
@@ -464,6 +521,32 @@ class TestOllamaClient:
         call_args = mock_urlopen.call_args[0][0]
         payload = json.loads(call_args.data.decode("utf-8"))
         assert payload["options"]["temperature"] == 0.5
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_passes_custom_keep_alive(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify custom keep_alive value is included in payload.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        send_request("http://localhost:11434", "model", "sys", [], keep_alive=600)
+
+        call_args = mock_urlopen.call_args[0][0]
+        payload = json.loads(call_args.data.decode("utf-8"))
+        assert payload["keep_alive"] == 600
 
     @patch("ollama_client.urllib.request.urlopen")
     def test_preload_model_sends_correct_payload(self, mock_urlopen: MagicMock) -> None:
