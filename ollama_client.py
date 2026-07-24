@@ -1,12 +1,17 @@
 import json
+import logging
 import urllib.request
 from typing import Any
 
 from config_loader import Config
+from session_logger import measure_duration
+
+logger = logging.getLogger(__name__)
 
 
 def create_client(config: Config) -> None:
     """Return None because Ollama uses direct HTTP requests."""
+    logger.debug("Created ollama client (no-op, using direct HTTP requests)")
     return None
 
 
@@ -35,8 +40,11 @@ def preload(config: Config, client: Any) -> None:
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
-        response.read()
+    with measure_duration() as elapsed:
+        with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
+            response.read()
+
+    logger.info("Model preloaded: model=%s duration_ms=%d", config.model, elapsed())
 
 
 def send_request(
@@ -73,6 +81,14 @@ def send_request(
         },
     }
 
+    logger.debug(
+        "Request payload: model=%s temperature=%s keep_alive=%s messages=%s",
+        config.model,
+        config.temperature,
+        config.keep_alive,
+        messages,
+    )
+
     request_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         url,
@@ -80,8 +96,18 @@ def send_request(
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
-        response_data = json.loads(response.read().decode("utf-8"))
+    with measure_duration() as elapsed:
+        with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
+            response_data = json.loads(response.read().decode("utf-8"))
+
+    logger.info(
+        "Response received: model=%s duration_ms=%d input_tokens=%s output_tokens=%s",
+        config.model,
+        elapsed(),
+        response_data.get("prompt_eval_count"),
+        response_data.get("eval_count"),
+    )
+    logger.debug("Response: %s", response_data)
 
     return response_data
 

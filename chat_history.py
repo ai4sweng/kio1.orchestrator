@@ -1,15 +1,22 @@
 import json
+import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
 
-def create_chat_file(chat_directory: str, system_prompt: str) -> Path:
+
+def create_chat_file(
+    chat_directory: str, system_prompt: str, session_id: str | None = None
+) -> Path:
     """Create a new chat history JSONL file with the system prompt as the first line.
 
     Args:
         chat_directory: Directory where chat files are stored.
         system_prompt: The system prompt to write as the first line.
+        session_id: Shared timestamp+uuid id used to name the file, pairing it
+            with the session's log file. A fresh id is generated when omitted.
 
     Returns:
         The `Path` to the newly created chat file.
@@ -17,11 +24,14 @@ def create_chat_file(chat_directory: str, system_prompt: str) -> Path:
     directory = Path(chat_directory)
     directory.mkdir(parents=True, exist_ok=True)
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    short_id = uuid.uuid4().hex[:8]
-    filepath = directory / f"chat_{timestamp}_{short_id}.jsonl"
+    if session_id is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        session_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
+
+    filepath = directory / f"chat_{session_id}.jsonl"
     line = json.dumps({"role": "system", "content": system_prompt})
     filepath.write_text(line + "\n")
+    logger.info("Created chat file: path=%s", filepath)
     return filepath
 
 

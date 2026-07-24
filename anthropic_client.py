@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any, cast
 
@@ -5,6 +6,9 @@ from anthropic import Anthropic
 from anthropic.types import MessageParam
 
 from config_loader import Config
+from session_logger import measure_duration
+
+logger = logging.getLogger(__name__)
 
 # Models that reject a custom `temperature` (400 if sent with a non-default value).
 # Omitting the parameter entirely is always safe — the API falls back to its own default.
@@ -31,6 +35,7 @@ def create_client(config: Config) -> Anthropic:
         raise ValueError(
             "ANTHROPIC_API_KEY environment variable is required when using the Anthropic provider"
         )
+    logger.debug("Created Anthropic client with model: %s", config.model)
     return Anthropic(
         api_key=api_key,
         timeout=config.request_timeout,
@@ -50,7 +55,9 @@ def preload(config: Config, client: Any) -> None:
     Raises:
         anthropic.NotFoundError: If config.model does not exist.
     """
-    client.models.retrieve(config.model)
+    with measure_duration() as elapsed:
+        client.models.retrieve(config.model)
+    logger.info("Model verified: model=%s duration_ms=%d", config.model, elapsed())
 
 
 def send_request(
@@ -80,7 +87,27 @@ def send_request(
     if config.model not in _NO_CUSTOM_TEMPERATURE:
         request_kwargs["temperature"] = config.temperature
 
-    return client.messages.create(**request_kwargs)
+    logger.debug(
+        "Request payload: model=%s temperature=%s messages=%s",
+        config.model,
+        config.temperature,
+        messages,
+    )
+
+    with measure_duration() as elapsed:
+        response = client.messages.create(**request_kwargs)
+
+    usage = getattr(response, "usage", None)
+    logger.info(
+        "Response received: model=%s duration_ms=%d input_tokens=%s output_tokens=%s",
+        config.model,
+        elapsed(),
+        getattr(usage, "input_tokens", None),
+        getattr(usage, "output_tokens", None),
+    )
+    logger.debug("Response: %s", response)
+
+    return response
 
 
 def extract_content(response: Any) -> str:
