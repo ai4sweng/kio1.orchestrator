@@ -1,8 +1,11 @@
+import logging
 from importlib import import_module
 from types import ModuleType
 from typing import Any, Protocol, cast
 
 from config_loader import Config
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderModule(Protocol):
@@ -83,5 +86,7 @@ def load_provider(
             f"Provider module {module_name!r} is missing functions: "
             f"{', '.join(missing_functions)}"
         )
+
+    logger.info("Loaded provider module: %s", module_name)
 
     return cast(ProviderModule, module)

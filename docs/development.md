@@ -34,9 +34,11 @@ anthropic_client.py  - Anthropic Messages API provider
 ollama_client.py     - Ollama HTTP client
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON pretty-printing
+session_logger.py    - Per-session log setup and duration measurement
 config.json          - Application settings
 prompts/             - System prompt files
 chats/               - Session history (auto-created, gitignored)
+logs/                - Session logs (auto-created, gitignored)
 tests/               - Unit tests
 docs/                - Documentation
 ```
@@ -108,3 +110,4 @@ The project intentionally minimizes external dependencies:
 - No classes except dataclasses for configuration.
 - Run `make format` before committing to apply consistent formatting.
 - Run `make ci` before opening a pull request.
+- Log with `%`-style placeholders (`logger.info("model=%s", model)`), not f-strings, so formatting is deferred until a record is actually emitted.

@@ -10,7 +10,9 @@ Each orchestrator session creates a JSONL (JSON Lines) file in the `chats/` dire
 chat_<YYYYMMDD>_<HHMMSS>_<8-char-uuid>.jsonl
 ```
 
-Example: `chat_20260710_172641_c2d9177c.jsonl`
+Example: `chat_20260724_101706_5dd461f5.jsonl`
+
+The id is generated once per session by `session_logger.generate_session_id()` and shared with that session's log file, so `chats/chat_<id>.jsonl` and `logs/log_<id>.log` describe the same run. A session that fails during startup produces a log file with no matching chat file.
 
 ## Message Schema
 
@@ -43,3 +45,5 @@ Each line follows the format:
 - Messages are appended after each successful exchange.
 - On conversation reload, the system prompt line is excluded from the message list sent to the model (it is injected separately in the API payload).
 - Files are never modified or deleted by the application; they accumulate as an audit trail.
+- The session's log file (`logs/log_<same-id>.log`) records timing, token counts, and errors for the same exchanges.
+
