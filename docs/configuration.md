@@ -15,7 +15,8 @@ All application settings are stored in `config.json` at the project root.
 | `request_timeout` | float | Request timeout in seconds |
 | `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded) | `-1` |
 | `max_tokens` | int | Maximum number of generated output tokens; does not limit input context |
-| `provider_options` | object | Optional provider-specific configuration (e.g. Ollama's `endpoint`) |
+| `provider_options.endpoint` | string | Ollama base URL (required for Ollama) |
+| `provider_options.num_ctx` | int | Ollama context window in tokens (required for Ollama); must be a positive integer larger than `max_tokens` |
 
 ## Example `config.json`
 
@@ -30,7 +31,8 @@ All application settings are stored in `config.json` at the project root.
     "request_timeout": 120,
         "keep_alive": -1,
         "provider_options": {
-        "endpoint": "http://localhost:11434"
+        "endpoint": "http://localhost:11434",
+        "num_ctx": 16384
     }
 }
 ```
@@ -105,6 +107,16 @@ Example configuration:
 ```
 
 The formatter accepts both plain JSON and JSON wrapped in a Markdown code fence.
+
+## Context Window
+
+`provider_options.num_ctx` sets the total token budget for a request — the system prompt, the whole conversation so far, and the generated response all share it. Because every turn re-sends the full transcript, this is what limits how long a conversation can run.
+
+`max_tokens` maps to Ollama's `num_predict` and caps only the output, so it must be smaller than `num_ctx` to leave room for the prompt.
+
+Ollama's own default is 4096 regardless of what the model supports (`ministral-3:8b` supports 262144), which is why an explicit value is required. Raising it costs RAM, since the cache is allocated when the model loads — 16384 comfortably fits roughly twenty turns.
+
+Zero and negative values are not sentinels for "use the model maximum". Ollama clamps them to a roughly 4-token window and still returns HTTP 200, producing unrelated output from a prompt that was silently discarded, so they are rejected at startup instead.
 
 ## Security
 

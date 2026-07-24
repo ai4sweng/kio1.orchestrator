@@ -72,11 +72,12 @@ Creates and returns the provider's SDK client (`None` for Ollama, which uses dir
 
 ### `preload(config, client) -> None`
 
-Performs provider-specific startup work. Ollama loads the model into memory; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`.
+Performs provider-specific startup work. Ollama loads the model into memory with the configured context window; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`.
 
 ### `send_request(config, client, system_prompt, messages) -> Any`
 
-Sends a chat request to the provider. Returns the raw provider response.
+Sends a chat request to the provider. Returns the raw provider response. For Ollama, raises `ValueError` if the response was truncated by the context window.
+
 
 ### `extract_content(response) -> str`
 

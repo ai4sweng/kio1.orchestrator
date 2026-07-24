@@ -47,13 +47,15 @@ def make_config(
         keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
         max_tokens: Maximum number of generated output tokens.
         provider_options: Optional provider-specific configuration; defaults
-            to an Ollama endpoint when not provided.
-
+            to an Ollama endpoint and context window when not provided.
     Returns:
         A `Config` instance for use in tests.
     """
     if provider_options is None:
-        provider_options = {"endpoint": "http://localhost:11434"}
+        provider_options = {
+            "endpoint": "http://localhost:11434",
+            "num_ctx": 16384,
+        }
 
     return Config(
         provider=provider,
@@ -490,6 +492,20 @@ class TestFormatter:
         expected = '{\n  "key": "value",\n  "num": 42\n}'
         assert result == expected
 
+    def test_format_json_raises_on_truncated_content(self) -> None:
+        """Verify incomplete JSON raises ValueError, not SyntaxError.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        truncated = '{"workflow_id": "wf-1", "explanation": "unterminated'
+
+        with pytest.raises(ValueError, match="neither valid JSON"):
+            format_json(truncated)
+
 
 class TestOllamaClient:
     """Tests for Ollama client logic with mocked HTTP."""
@@ -594,7 +610,8 @@ class TestOllamaClient:
         mock_urlopen.return_value = mock_response
 
         config = make_config(
-            model="model", provider_options={"endpoint": "http://myhost:1234"}
+            model="model",
+            provider_options={"endpoint": "http://myhost:1234", "num_ctx": 16384},
         )
         send_request(config, None, "sys", [])
 
@@ -725,6 +742,133 @@ class TestOllamaClient:
         preload(config, None)
 
         assert mock_urlopen.call_args[1]["timeout"] == 30
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_sends_context_options(self, mock_urlopen: MagicMock) -> None:
+        """Verify num_ctx and num_predict are sent in the payload options.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(
+            model="model",
+            max_tokens=2048,
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "num_ctx": 16384,
+            },
+        )
+        send_request(config, None, "sys", [])
+
+        payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        assert payload["options"]["num_ctx"] == 16384
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_preload_sends_context_option(self, mock_urlopen: MagicMock) -> None:
+        """Verify preload loads the model with the configured context size.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = b""
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="model")
+        preload(config, None)
+
+        payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        assert payload["options"]["num_ctx"] == 16384
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_rejects_truncated_response(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify a length-truncated response raises a clear error.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+
+        Returns:
+            None.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "message": {"content": '{"workflow_id": "wf-1"'},
+                "done_reason": "length",
+                "prompt_eval_count": 3432,
+                "eval_count": 664,
+            }
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="model")
+
+        with pytest.raises(ValueError, match="Response truncated"):
+            send_request(config, None, "sys", [])
+
+    @pytest.mark.parametrize("invalid_num_ctx", [None, 0, -1, "8192", 1.5, True])
+    def test_send_request_rejects_invalid_num_ctx(
+        self, invalid_num_ctx: object
+    ) -> None:
+        """Verify a missing or non-positive-integer num_ctx is rejected.
+
+        Args:
+            invalid_num_ctx: An unacceptable num_ctx value.
+
+        Returns:
+            None.
+        """
+        config = make_config(
+            model="model",
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "num_ctx": invalid_num_ctx,
+            },
+        )
+
+        with pytest.raises(ValueError, match="num_ctx"):
+            send_request(config, None, "sys", [])
+
+    def test_send_request_rejects_max_tokens_exceeding_context(self) -> None:
+        """Verify max_tokens must leave room for the prompt.
+
+        Args:
+            None.
+
+        Returns:
+            None.
+        """
+        config = make_config(
+            model="model",
+            max_tokens=8192,
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "num_ctx": 8192,
+            },
+        )
+
+        with pytest.raises(ValueError, match="must be smaller than"):
+            send_request(config, None, "sys", [])
 
 
 class TestOpenAIClient:

@@ -9,6 +9,7 @@
     "keep_alive": -1,
     "max_tokens": 4096,
     "provider_options": {
-        "endpoint": "http://localhost:11434"
-    } 
+        "endpoint": "http://localhost:11434",
+        "num_ctx": 16384
+    }
 }
