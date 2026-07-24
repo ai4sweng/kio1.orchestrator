@@ -17,13 +17,21 @@ def format_json(raw_json: str) -> str:
 
     Returns:
         A formatted JSON string with 2-space indentation.
+
+    Raises:
+        ValueError: If the content parses as neither JSON nor a Python literal.
     """
     normalized_content = _strip_markdown_fence(raw_json)
     try:
         parsed: Any = json.loads(normalized_content)
     except json.JSONDecodeError:
         logger.warning("Standard JSON parsing failed, falling back to ast.literal_eval")
-        parsed = ast.literal_eval(normalized_content)
+        try:
+            parsed = ast.literal_eval(normalized_content)
+        except (ValueError, SyntaxError) as error:
+            raise ValueError(
+                f"Content is neither valid JSON nor a Python literal: {error}"
+            ) from error
     return json.dumps(parsed, indent=2, ensure_ascii=False)
 
 
