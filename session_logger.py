@@ -47,7 +47,9 @@ def init_logger(log_directory: str, session_id: str) -> logging.Logger:
     stream_handler.setFormatter(formatter)
 
     logger = logging.getLogger()
-    logger.handlers.clear()
+    for handler in logger.handlers[:]:
+        logger.removeHandler(handler)
+        handler.close()
     logger.setLevel(logging.DEBUG)
     logger.addHandler(file_handler)
     logger.addHandler(stream_handler)

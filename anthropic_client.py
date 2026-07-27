@@ -87,12 +87,7 @@ def send_request(
     if config.model not in _NO_CUSTOM_TEMPERATURE:
         request_kwargs["temperature"] = config.temperature
 
-    logger.debug(
-        "Request payload: model=%s temperature=%s messages=%s",
-        config.model,
-        config.temperature,
-        messages,
-    )
+    logger.debug("Request payload: %s", request_kwargs)
 
     with measure_duration() as elapsed:
         response = client.messages.create(**request_kwargs)

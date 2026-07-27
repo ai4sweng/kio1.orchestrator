@@ -17,19 +17,12 @@ logger = logging.getLogger("main")
 
 
 def main() -> None:
-    """Run the orchestrator terminal application.
-
-    Args:
-        None.
-
-    Returns:
-        None.
-    """
-    session_id = generate_session_id()
-    init_logger("logs", session_id)
-    logger.info("Session started: session_id=%s", session_id)
-
+    """Run the orchestrator terminal application."""
     try:
+        session_id = generate_session_id()
+        init_logger("logs", session_id)
+        logger.info("Session started: session_id=%s", session_id)
+
         config = load_config()
         system_prompt = load_prompt(config.prompt_path)
 

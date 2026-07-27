@@ -68,23 +68,20 @@ def send_request(
     Returns:
         An OpenAI response.
     """
-    logger.debug(
-        "Request payload: model=%s temperature=%s messages=%s",
-        config.model,
-        config.temperature,
-        messages,
-    )
+    request_kwargs: dict[str, Any] = {
+        "model": config.model,
+        "messages": cast(
+            list[ChatCompletionMessageParam],
+            [{"role": "system", "content": system_prompt}, *messages],
+        ),
+        "temperature": config.temperature,
+        "response_format": {"type": "json_object"},
+    }
+
+    logger.debug("Request payload: %s", request_kwargs)
 
     with measure_duration() as elapsed:
-        response = client.chat.completions.create(
-            model=config.model,
-            messages=cast(
-                list[ChatCompletionMessageParam],
-                [{"role": "system", "content": system_prompt}, *messages],
-            ),
-            temperature=config.temperature,
-            response_format={"type": "json_object"},
-        )
+        response = client.chat.completions.create(**request_kwargs)
 
     usage = getattr(response, "usage", None)
     logger.info(
