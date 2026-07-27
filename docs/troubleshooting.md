@@ -21,7 +21,7 @@ Ollama requires:
 ```json
 "provider_options": {
     "endpoint": "http://localhost:11434",
-    "num_ctx": 16384
+    "context_window_size": 16384
 }
 ```
 
@@ -51,6 +51,6 @@ The system prompt asks providers to return JSON only. The formatter also removes
 
 ## Response truncated
 
-A request failing with `Response truncated before completion` means the prompt plus the generated output exceeded `provider_options.num_ctx`. Since each turn re-sends the whole transcript, long conversations reach the limit eventually.
+A request failing with `Response truncated before completion` means the prompt plus the generated output exceeded `provider_options.context_window_size`. Since each turn re-sends the whole transcript, long conversations reach the limit eventually.
 
-Either raise `num_ctx` in `config.json` or start a new session. The error reports the actual token counts so you can see how much headroom is missing.
+Either raise `context_window_size` in `config.json` or start a new session. The error reports the actual token counts so you can see how much headroom is missing.

@@ -54,7 +54,7 @@ def make_config(
     if provider_options is None:
         provider_options = {
             "endpoint": "http://localhost:11434",
-            "num_ctx": 16384,
+            "context_window_size": 16384,
         }
 
     return Config(
@@ -493,14 +493,7 @@ class TestFormatter:
         assert result == expected
 
     def test_format_json_raises_on_truncated_content(self) -> None:
-        """Verify incomplete JSON raises ValueError, not SyntaxError.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify incomplete JSON raises ValueError, not SyntaxError."""
         truncated = '{"workflow_id": "wf-1", "explanation": "unterminated'
 
         with pytest.raises(ValueError, match="neither valid JSON"):
@@ -611,7 +604,10 @@ class TestOllamaClient:
 
         config = make_config(
             model="model",
-            provider_options={"endpoint": "http://myhost:1234", "num_ctx": 16384},
+            provider_options={
+                "endpoint": "http://myhost:1234",
+                "context_window_size": 16384,
+            },
         )
         send_request(config, None, "sys", [])
 
@@ -745,14 +741,7 @@ class TestOllamaClient:
 
     @patch("ollama_client.urllib.request.urlopen")
     def test_send_request_sends_context_options(self, mock_urlopen: MagicMock) -> None:
-        """Verify num_ctx and num_predict are sent in the payload options.
-
-        Args:
-            mock_urlopen: Mock for `urllib.request.urlopen`.
-
-        Returns:
-            None.
-        """
+        """Verify num_ctx and num_predict are sent in the payload options."""
         mock_response = MagicMock()
         mock_response.read.return_value = json.dumps(
             {"message": {"content": "{}"}}
@@ -766,7 +755,7 @@ class TestOllamaClient:
             max_tokens=2048,
             provider_options={
                 "endpoint": "http://localhost:11434",
-                "num_ctx": 16384,
+                "context_window_size": 16384,
             },
         )
         send_request(config, None, "sys", [])
@@ -780,9 +769,6 @@ class TestOllamaClient:
 
         Args:
             mock_urlopen: Mock for `urllib.request.urlopen`.
-
-        Returns:
-            None.
         """
         mock_response = MagicMock()
         mock_response.read.return_value = b""
@@ -804,9 +790,6 @@ class TestOllamaClient:
 
         Args:
             mock_urlopen: Mock for `urllib.request.urlopen`.
-
-        Returns:
-            None.
         """
         mock_response = MagicMock()
         mock_response.read.return_value = json.dumps(
@@ -826,44 +809,36 @@ class TestOllamaClient:
         with pytest.raises(ValueError, match="Response truncated"):
             send_request(config, None, "sys", [])
 
-    @pytest.mark.parametrize("invalid_num_ctx", [None, 0, -1, "8192", 1.5, True])
-    def test_send_request_rejects_invalid_num_ctx(
-        self, invalid_num_ctx: object
+    @pytest.mark.parametrize(
+        "invalid_context_window_size", [None, 0, -1, "8192", 1.5, True]
+    )
+    def test_send_request_rejects_invalid_context_window_size(
+        self, invalid_context_window_size: object
     ) -> None:
-        """Verify a missing or non-positive-integer num_ctx is rejected.
+        """Verify a missing or non-positive-integer context_window_size is rejected.
 
         Args:
-            invalid_num_ctx: An unacceptable num_ctx value.
-
-        Returns:
-            None.
+            invalid_context_window_size: An unacceptable context_window_size value.
         """
         config = make_config(
             model="model",
             provider_options={
                 "endpoint": "http://localhost:11434",
-                "num_ctx": invalid_num_ctx,
+                "context_window_size": invalid_context_window_size,
             },
         )
 
-        with pytest.raises(ValueError, match="num_ctx"):
+        with pytest.raises(ValueError, match="context_window_size"):
             send_request(config, None, "sys", [])
 
     def test_send_request_rejects_max_tokens_exceeding_context(self) -> None:
-        """Verify max_tokens must leave room for the prompt.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify max_tokens must leave room for the prompt."""
         config = make_config(
             model="model",
             max_tokens=8192,
             provider_options={
                 "endpoint": "http://localhost:11434",
-                "num_ctx": 8192,
+                "context_window_size": 8192,
             },
         )
 

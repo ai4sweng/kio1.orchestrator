@@ -31,7 +31,7 @@ def preload(config: Config, client: Any) -> None:
         "messages": [],
         "keep_alive": config.keep_alive,
         "options": {
-            "num_ctx": _get_num_ctx(config),
+            "num_ctx": _get_context_window_size(config),
         },
     }
 
@@ -67,7 +67,7 @@ def send_request(
         ValueError: If the response was truncated by the context window.
     """
     endpoint = _get_endpoint(config)
-    num_ctx = _get_num_ctx(config)
+    context_window_size = _get_context_window_size(config)
     url = f"{endpoint}/api/chat"
 
     payload = {
@@ -81,7 +81,7 @@ def send_request(
         "keep_alive": config.keep_alive,
         "options": {
             "temperature": config.temperature,
-            "num_ctx": num_ctx,
+            "num_ctx": context_window_size,
         },
     }
 
@@ -100,8 +100,8 @@ def send_request(
             f"Response truncated before completion: "
             f"prompt={response_data.get('prompt_eval_count')} tokens, "
             f"output={response_data.get('eval_count')} tokens, "
-            f"num_ctx={num_ctx}. Increase provider_options.num_ctx "
-            f"or start a new session."
+            f"num_ctx={context_window_size}. Increase "
+            f"provider_options.context_window_size or start a new session."
         )
 
     return response_data
@@ -139,7 +139,7 @@ def _get_endpoint(config: Config) -> str:
     return endpoint.rstrip("/")
 
 
-def _get_num_ctx(config: Config) -> int:
+def _get_context_window_size(config: Config) -> int:
     """Read and validate the Ollama context window size.
 
     Args:
@@ -149,23 +149,25 @@ def _get_num_ctx(config: Config) -> int:
         The configured context window size in tokens.
 
     Raises:
-        ValueError: If provider_options.num_ctx is missing or not a positive
-            integer, or if max_tokens leaves no room for the prompt. Ollama
-            clamps zero and negative values to a roughly 4-token window and
-            returns HTTP 200 rather than rejecting them, so invalid values
+        ValueError: If provider_options.context_window_size is missing or not a
+            positive integer, or if max_tokens leaves no room for the prompt.
+            Ollama clamps zero and negative values to a roughly 4-token window
+            and returns HTTP 200 rather than rejecting them, so invalid values
             must be caught here.
     """
-    num_ctx = config.provider_options.get("num_ctx")
+    context_window_size = config.provider_options.get("context_window_size")
 
-    if type(num_ctx) is not int or num_ctx <= 0:
+    if type(context_window_size) is not int or context_window_size <= 0:
         raise ValueError(
-            "Ollama requires provider_options.num_ctx as a positive integer"
+            "Ollama requires provider_options.context_window_size as a "
+            "positive integer"
         )
 
-    if config.max_tokens >= num_ctx:
+    if config.max_tokens >= context_window_size:
         raise ValueError(
             f"max_tokens ({config.max_tokens}) must be smaller than "
-            f"provider_options.num_ctx ({num_ctx}) to leave room for the prompt"
+            f"provider_options.context_window_size ({context_window_size}) to "
+            f"leave room for the prompt"
         )
 
-    return num_ctx
+    return context_window_size
