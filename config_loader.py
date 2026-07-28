@@ -1,7 +1,10 @@
 import json
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -44,6 +47,13 @@ def load_config(config_path: str = "config.json") -> Config:
     keep_alive = data.get("keep_alive", -1)
     if type(keep_alive) is not int:
         raise ValueError("keep_alive must be an integer.")
+
+    logger.info(
+        "Config loaded: provider=%s model=%s prompt_path=%s",
+        data["provider"],
+        data["model"],
+        data["prompt_path"],
+    )
 
     return Config(
         provider=data["provider"],

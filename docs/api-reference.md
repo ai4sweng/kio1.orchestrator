@@ -9,13 +9,17 @@ provider_client --> ProviderModule (Protocol)
 
 prompt_loader --> load_prompt()
 
+session_logger --> generate_session_id()
+                --> init_logger()
+                --> measure_duration()
+
 ollama_client / openai_client / anthropic_client
                 --> create_client(config)
                 --> preload(config, client)
                 --> send_request(config, client, system_prompt, messages)
                 --> extract_content(response)
 
-chat_history  --> create_chat_file()
+chat_history  --> create_chat_file(chat_directory, system_prompt, session_id)
               --> append_user_message()
               --> append_assistant_message()
               --> load_messages()
@@ -62,6 +66,34 @@ Reads and returns the stripped text content of a prompt file.
 
 Raises `FileNotFoundError` if the file does not exist.
 
+## `session_logger`
+
+### `generate_session_id() -> str`
+
+Returns a `<YYYYMMDD>_<HHMMSS>_<8-char-uuid>` id, generated once per run and shared by the session's log file and chat file so the two can be correlated.
+
+### `init_logger(log_directory, session_id) -> logging.Logger`
+
+Records are formatted as UTC ISO 8601 with milliseconds, followed by the session id, level, module, and message. Creates `log_directory` if absent, clears any pre-existing root handlers so repeated calls do not duplicate output, and raises `httpx`, `httpcore`, `openai`, and `anthropic` to `WARNING` to keep third-party request logging out of the session file.
+
+| Handler | Destination | Level |
+|---------|-------------|-------|
+| `FileHandler` | `logs/log_<session_id>.log` | `DEBUG` |
+| `StreamHandler` | stderr | `ERROR` |
+
+Creates `log_directory` if absent, clears any pre-existing root handlers so repeated calls do not duplicate output, and raises `httpx`, `httpcore`, `openai`, and `anthropic` to `WARNING` to keep third-party request logging out of the session file.
+
+### `measure_duration() -> Iterator[Callable[[], int]]`
+
+Context manager measuring wall-clock time with `time.perf_counter()`. Yields a callable returning elapsed whole milliseconds:
+
+```python
+with measure_duration() as elapsed:
+    response = client.messages.create(**request_kwargs)
+
+logger.info("Response received: duration_ms=%d", elapsed())
+```
+
 ## Provider modules (`ollama_client`, `openai_client`, `anthropic_client`)
 
 Each provider module implements the same four functions:
@@ -72,7 +104,7 @@ Creates and returns the provider's SDK client (`None` for Ollama, which uses dir
 
 ### `preload(config, client) -> None`
 
-Performs provider-specific startup work. Ollama loads the model into memory; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`.
+Performs provider-specific startup work. Ollama loads the model into memory; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`. Logs its own duration separately from request timing.
 
 ### `send_request(config, client, system_prompt, messages) -> Any`
 
@@ -85,10 +117,12 @@ Extracts the assistant's text content from a provider response.
 
 ## `chat_history`
 
-### `create_chat_file(chat_directory, system_prompt) -> Path`
+### `create_chat_file(chat_directory, system_prompt, session_id=None) -> Path`
 
 Creates a JSONL chat file with the system prompt as the first line.
-Filename format: `chat_<YYYYMMDD_HHMMSS>_<8-char-uuid>.jsonl`
+Filename format: `chat_<session_id>.jsonl`
+
+`session_id` should be the id from `generate_session_id()`, pairing the chat file with the session's log file. When omitted, a fresh id is generated internally.
 
 ### `append_user_message(chat_file, message) -> None`
 
