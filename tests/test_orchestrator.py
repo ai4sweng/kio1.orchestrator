@@ -424,9 +424,6 @@ class TestSessionLogger:
     def restore_root_logger(self) -> Iterator[None]:
         """Save root logger state before each test and restore it afterwards.
 
-        Args:
-            None.
-
         Returns:
             An iterator that yields once, restoring handlers on teardown.
         """
@@ -444,25 +441,11 @@ class TestSessionLogger:
         root.setLevel(original_level)
 
     def test_generate_session_id_format(self) -> None:
-        """Verify the session id is a timestamp followed by an 8-char hex suffix.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify the session id is a timestamp followed by an 8-char hex suffix."""
         assert re.fullmatch(r"\d{8}_\d{6}_[0-9a-f]{8}", generate_session_id())
 
     def test_generate_session_id_is_unique(self) -> None:
-        """Verify consecutive session ids differ even within the same second.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify consecutive session ids differ even within the same second."""
         assert generate_session_id() != generate_session_id()
 
     def test_init_logger_creates_log_file(self, tmp_path: Path) -> None:
@@ -470,9 +453,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         log_dir = tmp_path / "logs"
         init_logger(str(log_dir), "20260723_140211_a1b2c3d4")
@@ -485,9 +465,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         init_logger(str(tmp_path / "logs"), "session1")
         handlers = logging.getLogger().handlers
@@ -503,9 +480,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         init_logger(str(tmp_path / "logs"), "session1")
         init_logger(str(tmp_path / "logs"), "session2")
@@ -517,9 +491,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         log_dir = tmp_path / "logs"
         init_logger(str(log_dir), "session1")
@@ -537,9 +508,6 @@ class TestSessionLogger:
         Args:
             tmp_path: Pytest temporary directory fixture.
             capsys: Pytest fixture capturing stdout and stderr.
-
-        Returns:
-            None.
         """
         init_logger(str(tmp_path / "logs"), "session1")
 
@@ -556,9 +524,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         init_logger(str(tmp_path / "logs"), "session1")
 
@@ -570,9 +535,6 @@ class TestSessionLogger:
 
         Args:
             tmp_path: Pytest temporary directory fixture.
-
-        Returns:
-            None.
         """
         session_id = generate_session_id()
         init_logger(str(tmp_path / "logs"), session_id)
@@ -586,14 +548,7 @@ class TestFormatter:
     """Tests for JSON formatting."""
 
     def test_format_json_pretty_prints(self) -> None:
-        """Verify JSON is formatted with 2-space indentation.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify JSON is formatted with 2-space indentation."""
         raw = '{"key":"value","num":42}'
         result = format_json(raw)
 
@@ -601,14 +556,7 @@ class TestFormatter:
         assert result == expected
 
     def test_format_json_nested(self) -> None:
-        """Verify nested JSON is properly formatted.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify nested JSON is properly formatted."""
         raw = '{"outer":{"inner":"value"}}'
         result = format_json(raw)
 
@@ -1252,9 +1200,6 @@ class TestProviderLogging:
         Args:
             mock_urlopen: Mock for `urllib.request.urlopen`.
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         mock_response = MagicMock()
         mock_response.read.return_value = json.dumps(
@@ -1287,9 +1232,6 @@ class TestProviderLogging:
         Args:
             mock_urlopen: Mock for `urllib.request.urlopen`.
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         mock_response = MagicMock()
         mock_response.read.return_value = b""
@@ -1313,9 +1255,6 @@ class TestProviderLogging:
 
         Args:
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         client = MagicMock()
         client.chat.completions.create.return_value = SimpleNamespace(
@@ -1338,9 +1277,6 @@ class TestProviderLogging:
 
         Args:
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         client = MagicMock()
         config = make_config(provider="openai", model="gpt-4o-mini")
@@ -1359,9 +1295,6 @@ class TestProviderLogging:
 
         Args:
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         client = MagicMock()
         client.messages.create.return_value = SimpleNamespace(
@@ -1384,9 +1317,6 @@ class TestProviderLogging:
 
         Args:
             caplog: Pytest fixture capturing log records.
-
-        Returns:
-            None.
         """
         client = MagicMock()
         config = make_config(provider="anthropic", model="claude-haiku-4-5")
@@ -1415,9 +1345,6 @@ class TestProviderLoading:
 
         Args:
             provider_name: Name of the provider module to load.
-
-        Returns:
-            None.
         """
         provider = load_provider(
             provider_name, frozenset({"ollama", "openai", "anthropic"})
@@ -1429,39 +1356,18 @@ class TestProviderLoading:
         assert callable(provider.extract_content)
 
     def test_load_provider_rejects_invalid_name(self) -> None:
-        """Verify unsafe module names are rejected.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify unsafe module names are rejected."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("../openai", frozenset({"ollama", "openai", "anthropic"}))
 
     def test_load_provider_rejects_unknown_provider(self) -> None:
-        """Verify a provider outside the allowlist produces a useful error.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify a provider outside the allowlist produces a useful error."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider(
                 "missing_provider", frozenset({"ollama", "openai", "anthropic"})
             )
 
     def test_load_provider_respects_restricted_allowlist(self) -> None:
-        """Verify a provider excluded from the caller's allowlist is rejected.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify a provider excluded from the caller's allowlist is rejected."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("openai", frozenset({"ollama"}))

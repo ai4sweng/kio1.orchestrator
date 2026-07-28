@@ -3,17 +3,19 @@ import time
 import uuid
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 
 def generate_session_id() -> str:
     """Generate a timestamp+uuid id shared by the log file and chat file.
 
+    The timestamp is UTC, matching the UTC timestamps on every log line.
+
     Returns:
         A string like "20260723_140211_a1b2c3d4".
     """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     short_id = uuid.uuid4().hex[:8]
     return f"{timestamp}_{short_id}"
 

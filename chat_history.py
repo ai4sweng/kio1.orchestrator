@@ -1,8 +1,8 @@
 import json
 import logging
-import uuid
-from datetime import datetime
 from pathlib import Path
+
+from session_logger import generate_session_id
 
 logger = logging.getLogger(__name__)
 
@@ -25,8 +25,7 @@ def create_chat_file(
     directory.mkdir(parents=True, exist_ok=True)
 
     if session_id is None:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        session_id = f"{timestamp}_{uuid.uuid4().hex[:8]}"
+        session_id = generate_session_id()
 
     filepath = directory / f"chat_{session_id}.jsonl"
     line = json.dumps({"role": "system", "content": system_prompt})

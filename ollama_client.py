@@ -81,13 +81,7 @@ def send_request(
         },
     }
 
-    logger.debug(
-        "Request payload: model=%s temperature=%s keep_alive=%s messages=%s",
-        config.model,
-        config.temperature,
-        config.keep_alive,
-        messages,
-    )
+    logger.debug("Request payload: %s", payload)
 
     request_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
