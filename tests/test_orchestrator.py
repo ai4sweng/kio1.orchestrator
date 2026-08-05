@@ -38,7 +38,7 @@ def make_config(
     temperature: float = 0.1,
     request_timeout: float = 120,
     keep_alive: int = -1,
-    max_tokens: int = 1024,
+    max_output_tokens: int = 1024,
     provider_options: dict[str, Any] | None = None,
 ) -> Config:
     """Create a configuration for provider tests.
@@ -50,15 +50,17 @@ def make_config(
         temperature: Sampling temperature.
         request_timeout: Request timeout in seconds.
         keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
-        max_tokens: Maximum number of generated output tokens.
+        max_output_tokens: Maximum number of generated output tokens.
         provider_options: Optional provider-specific configuration; defaults
-            to an Ollama endpoint when not provided.
-
+            to an Ollama endpoint and context window when not provided.
     Returns:
         A `Config` instance for use in tests.
     """
     if provider_options is None:
-        provider_options = {"endpoint": "http://localhost:11434"}
+        provider_options = {
+            "endpoint": "http://localhost:11434",
+            "context_window_size": 16384,
+        }
 
     return Config(
         provider=provider,
@@ -69,7 +71,7 @@ def make_config(
         temperature=temperature,
         request_timeout=request_timeout,
         keep_alive=keep_alive,
-        max_tokens=max_tokens,
+        max_output_tokens=max_output_tokens,
         provider_options=provider_options,
     )
 
@@ -94,7 +96,7 @@ class TestConfigLoader:
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "custom_option": "custom-value",
             },
@@ -112,7 +114,7 @@ class TestConfigLoader:
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
-        assert config.max_tokens == 2048
+        assert config.max_output_tokens == 2048
         assert config.provider_options == {"custom_option": "custom-value"}
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
@@ -133,7 +135,7 @@ class TestConfigLoader:
             "temperature": 0.1,
             "keep_alive": -1,
             "request_timeout": 120,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "endpoint": "http://localhost:11434",
             },
@@ -164,7 +166,7 @@ class TestConfigLoader:
             "temperature": 0.1,
             "request_timeout": 120,
             "keep_alive": 600,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "endpoint": "http://localhost:11434",
             },
@@ -237,7 +239,7 @@ class TestConfigLoader:
             temperature=0.1,
             request_timeout=120,
             keep_alive=-1,
-            max_tokens=2048,
+            max_output_tokens=2048,
             provider_options={"example": True},
         )
         assert config.provider == "test_provider"
@@ -245,7 +247,7 @@ class TestConfigLoader:
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
-        assert config.max_tokens == 2048
+        assert config.max_output_tokens == 2048
         assert config.provider_options == {"example": True}
 
 
@@ -608,6 +610,13 @@ class TestFormatter:
         expected = '{\n  "key": "value",\n  "num": 42\n}'
         assert result == expected
 
+    def test_format_json_raises_on_truncated_content(self) -> None:
+        """Verify incomplete JSON raises ValueError, not SyntaxError."""
+        truncated = '{"workflow_id": "wf-1", "explanation": "unterminated'
+
+        with pytest.raises(ValueError, match="neither valid JSON"):
+            format_json(truncated)
+
 
 class TestOllamaClient:
     """Tests for Ollama client logic with mocked HTTP."""
@@ -712,7 +721,11 @@ class TestOllamaClient:
         mock_urlopen.return_value = mock_response
 
         config = make_config(
-            model="model", provider_options={"endpoint": "http://myhost:1234"}
+            model="model",
+            provider_options={
+                "endpoint": "http://myhost:1234",
+                "context_window_size": 16384,
+            },
         )
         send_request(config, None, "sys", [])
 
@@ -844,6 +857,113 @@ class TestOllamaClient:
 
         assert mock_urlopen.call_args[1]["timeout"] == 30
 
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_sends_context_options(self, mock_urlopen: MagicMock) -> None:
+        """Verify num_ctx and num_predict are sent in the payload options."""
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {"message": {"content": "{}"}}
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(
+            model="model",
+            max_output_tokens=2048,
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "context_window_size": 16384,
+            },
+        )
+        send_request(config, None, "sys", [])
+
+        payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        assert payload["options"]["num_ctx"] == 16384
+        assert payload["options"]["num_predict"] == 2048
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_preload_sends_context_option(self, mock_urlopen: MagicMock) -> None:
+        """Verify preload loads the model with the configured context size.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = b""
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="model")
+        preload(config, None)
+
+        payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
+        assert payload["options"]["num_ctx"] == 16384
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_send_request_rejects_truncated_response(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify a length-truncated response raises a clear error.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "message": {"content": '{"workflow_id": "wf-1"'},
+                "done_reason": "length",
+                "prompt_eval_count": 3432,
+                "eval_count": 664,
+            }
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="model")
+
+        with pytest.raises(ValueError, match="Response truncated"):
+            send_request(config, None, "sys", [])
+
+    @pytest.mark.parametrize(
+        "invalid_context_window_size", [None, 0, -1, "8192", 1.5, True]
+    )
+    def test_send_request_rejects_invalid_context_window_size(
+        self, invalid_context_window_size: object
+    ) -> None:
+        """Verify a missing or non-positive-integer context_window_size is rejected.
+
+        Args:
+            invalid_context_window_size: An unacceptable context_window_size value.
+        """
+        config = make_config(
+            model="model",
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "context_window_size": invalid_context_window_size,
+            },
+        )
+
+        with pytest.raises(ValueError, match="context_window_size"):
+            send_request(config, None, "sys", [])
+
+    def test_send_request_rejects_max_output_tokens_exceeding_context(self) -> None:
+        """Verify max_output_tokens must leave room for the prompt."""
+        config = make_config(
+            model="model",
+            max_output_tokens=8192,
+            provider_options={
+                "endpoint": "http://localhost:11434",
+                "context_window_size": 8192,
+            },
+        )
+
+        with pytest.raises(ValueError, match="must be smaller than"):
+            send_request(config, None, "sys", [])
+
 
 class TestOpenAIClient:
     """Tests for OpenAI client logic with mocked SDK calls."""
@@ -940,7 +1060,10 @@ class TestOpenAIClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="openai", temperature=0.2, max_tokens=500, provider_options={}
+            provider="openai",
+            temperature=0.2,
+            max_output_tokens=500,
+            provider_options={},
         )
         send_openai_request(
             config,
@@ -953,6 +1076,7 @@ class TestOpenAIClient:
             model="test-model",
             messages=[{"role": "system", "content": "system prompt"}, *messages],
             temperature=0.2,
+            max_completion_tokens=500,
             response_format={
                 "type": "json_object",
             },
@@ -1098,7 +1222,10 @@ class TestAnthropicClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="anthropic", temperature=0.2, max_tokens=500, provider_options={}
+            provider="anthropic",
+            temperature=0.2,
+            max_output_tokens=500,
+            provider_options={},
         )
         send_anthropic_request(
             config=config,
@@ -1258,7 +1385,8 @@ class TestProviderLogging:
         """
         client = MagicMock()
         client.chat.completions.create.return_value = SimpleNamespace(
-            usage=SimpleNamespace(prompt_tokens=412, completion_tokens=286)
+            usage=SimpleNamespace(prompt_tokens=412, completion_tokens=286),
+            choices=[SimpleNamespace(finish_reason="stop")],
         )
 
         config = make_config(provider="openai", model="gpt-4o-mini")

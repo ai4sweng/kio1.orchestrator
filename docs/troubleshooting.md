@@ -20,7 +20,8 @@ Ollama requires:
 
 ```json
 "provider_options": {
-    "endpoint": "http://localhost:11434"
+    "endpoint": "http://localhost:11434",
+    "context_window_size": 16384
 }
 ```
 
@@ -47,6 +48,12 @@ Confirm that the configured model ID exists and is available to the selected pro
 ## Invalid JSON response
 
 The system prompt asks providers to return JSON only. The formatter also removes optional Markdown JSON fences before parsing provider output.
+
+## Response truncated
+
+A request failing with `Response truncated before completion` reached either `max_output_tokens` or `provider_options.context_window_size`. Since each turn re-sends the whole transcript, long conversations eventually consume the available context.
+
+Increase `max_output_tokens` if the output cap was reached. Otherwise, raise `context_window_size` or start a new session. The error reports both limits and the actual token counts.
 
 ## Reading the logs
 

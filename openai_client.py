@@ -76,6 +76,7 @@ def send_request(
         ),
         "temperature": config.temperature,
         "response_format": {"type": "json_object"},
+        "max_completion_tokens": config.max_output_tokens,
     }
 
     logger.debug("Request payload: %s", request_kwargs)
@@ -91,6 +92,13 @@ def send_request(
         getattr(usage, "prompt_tokens", None),
         getattr(usage, "completion_tokens", None),
     )
+
+    if response.choices[0].finish_reason == "length":
+        raise ValueError(
+            "OpenAI response reached max_output_tokens "
+            f"({config.max_output_tokens}) before completion."
+        )
+
     logger.debug("Response: %s", response)
 
     return response

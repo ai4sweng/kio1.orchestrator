@@ -19,7 +19,7 @@ class Config:
     temperature: float
     request_timeout: float
     keep_alive: int
-    max_tokens: int
+    max_output_tokens: int
     provider_options: dict[str, Any] = field(default_factory=dict)
 
 
@@ -48,6 +48,10 @@ def load_config(config_path: str = "config.json") -> Config:
     if type(keep_alive) is not int:
         raise ValueError("keep_alive must be an integer.")
 
+    max_output_tokens = data.get("max_output_tokens", 4096)
+    if type(max_output_tokens) is not int or max_output_tokens <= 0:
+        raise ValueError("max_output_tokens must be a positive integer.")
+
     logger.info(
         "Config loaded: provider=%s model=%s prompt_path=%s",
         data["provider"],
@@ -64,6 +68,6 @@ def load_config(config_path: str = "config.json") -> Config:
         temperature=data["temperature"],
         request_timeout=data["request_timeout"],
         keep_alive=keep_alive,
-        max_tokens=data["max_tokens"],
+        max_output_tokens=max_output_tokens,
         provider_options=provider_options,
     )

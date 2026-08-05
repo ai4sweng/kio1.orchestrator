@@ -82,7 +82,7 @@ def send_request(
         "model": config.model,
         "system": system_prompt,
         "messages": cast(list[MessageParam], messages),
-        "max_tokens": config.max_tokens,
+        "max_tokens": config.max_output_tokens,
     }
     if config.model not in _NO_CUSTOM_TEMPERATURE:
         request_kwargs["temperature"] = config.temperature
@@ -100,6 +100,13 @@ def send_request(
         getattr(usage, "input_tokens", None),
         getattr(usage, "output_tokens", None),
     )
+
+    if getattr(response, "stop_reason", None) == "max_tokens":
+        raise ValueError(
+            "Anthropic response reached max_output_tokens "
+            f"({config.max_output_tokens}) before completion."
+        )
+
     logger.debug("Response: %s", response)
 
     return response

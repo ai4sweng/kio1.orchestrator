@@ -18,6 +18,10 @@ def create_client(config: Config) -> None:
 def preload(config: Config, client: Any) -> None:
     """Preload a model into Ollama's memory.
 
+    The context window is sent here as well as on requests, because Ollama
+    allocates its cache when the model loads. Loading with a smaller window
+    than requests use would force a reload on the first request.
+
     Args:
         config: Application configuration.
         client: Not used for Ollama, included for interface consistency.
@@ -31,6 +35,9 @@ def preload(config: Config, client: Any) -> None:
         "model": config.model,
         "messages": [],
         "keep_alive": config.keep_alive,
+        "options": {
+            "num_ctx": _get_context_window_size(config),
+        },
     }
 
     request_data = json.dumps(payload).encode("utf-8")
@@ -63,8 +70,12 @@ def send_request(
 
     Returns:
         The parsed JSON response from the model as a dictionary.
+
+    Raises:
+        ValueError: If the response was truncated by the context window or output limit.
     """
     endpoint = _get_endpoint(config)
+    context_window_size = _get_context_window_size(config)
     url = f"{endpoint}/api/chat"
 
     payload = {
@@ -78,6 +89,8 @@ def send_request(
         "keep_alive": config.keep_alive,
         "options": {
             "temperature": config.temperature,
+            "num_ctx": context_window_size,
+            "num_predict": config.max_output_tokens,
         },
     }
 
@@ -102,6 +115,18 @@ def send_request(
         response_data.get("eval_count"),
     )
     logger.debug("Response: %s", response_data)
+
+    if response_data.get("done_reason") == "length":
+        raise ValueError(
+            f"Response truncated before completion: "
+            f"prompt={response_data.get('prompt_eval_count')} tokens, "
+            f"output={response_data.get('eval_count')} tokens, "
+            f"context_window_size={context_window_size}, "
+            f"max_output_tokens={config.max_output_tokens}. "
+            "Increase max_output_tokens if the output limit was reached; "
+            "otherwise increase provider_options.context_window_size "
+            "or start a new session."
+        )
 
     return response_data
 
@@ -136,3 +161,37 @@ def _get_endpoint(config: Config) -> str:
         raise ValueError("Ollama requires provider_options.endpoint")
 
     return endpoint.rstrip("/")
+
+
+def _get_context_window_size(config: Config) -> int:
+    """Read and validate the Ollama context window size.
+
+    Args:
+        config: Application configuration containing provider options.
+
+    Returns:
+        The configured context window size in tokens.
+
+    Raises:
+        ValueError: If provider_options.context_window_size is missing or not a
+            positive integer, or if max_output_tokens leaves no room for the prompt.
+            Ollama clamps zero and negative values to a roughly 4-token window
+            and returns HTTP 200 rather than rejecting them, so invalid values
+            must be caught here.
+    """
+    context_window_size = config.provider_options.get("context_window_size")
+
+    if type(context_window_size) is not int or context_window_size <= 0:
+        raise ValueError(
+            "Ollama requires provider_options.context_window_size as a "
+            "positive integer"
+        )
+
+    if config.max_output_tokens >= context_window_size:
+        raise ValueError(
+            f"max_output_tokens ({config.max_output_tokens}) must be smaller than "
+            f"provider_options.context_window_size ({context_window_size}) to "
+            f"leave room for the prompt"
+        )
+
+    return context_window_size

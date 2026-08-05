@@ -41,7 +41,7 @@ formatter     --> format_json()
 | `temperature` | `float` | Sampling temperature |
 | `request_timeout` | `float` | HTTP timeout in seconds |
 | `keep_alive` | `int` | Ollama residency control (`-1` keeps loaded) |
-| `max_tokens` | `int` | Maximum output tokens |
+| `max_output_tokens` | `int` | Maximum generated output tokens |
 | `provider_options` | `dict[str, Any]` | Provider-specific configuration |
 
 ### `load_config(config_path="config.json") -> Config`
@@ -81,8 +81,6 @@ Records are formatted as UTC ISO 8601 with milliseconds, followed by the session
 | `FileHandler` | `logs/log_<session_id>.log` | `DEBUG` |
 | `StreamHandler` | stderr | `ERROR` |
 
-Creates `log_directory` if absent, clears any pre-existing root handlers so repeated calls do not duplicate output, and raises `httpx`, `httpcore`, `openai`, and `anthropic` to `WARNING` to keep third-party request logging out of the session file.
-
 ### `measure_duration() -> Iterator[Callable[[], int]]`
 
 Context manager measuring wall-clock time with `time.perf_counter()`. Yields a callable returning elapsed whole milliseconds:
@@ -104,11 +102,12 @@ Creates and returns the provider's SDK client (`None` for Ollama, which uses dir
 
 ### `preload(config, client) -> None`
 
-Performs provider-specific startup work. Ollama loads the model into memory; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`. Logs its own duration separately from request timing.
+Performs provider-specific startup work. Ollama loads the model into memory with the configured context window; OpenAI and Anthropic verify the configured model exists via `client.models.retrieve(config.model)`. Each preload operation logs its duration separately from request timing.
 
 ### `send_request(config, client, system_prompt, messages) -> Any`
 
-Sends a chat request to the provider. Returns the raw provider response.
+Sends a chat request to the provider and returns the raw response. Raises `ValueError` when the provider reports that generation stopped at a configured token limit.
+
 
 ### `extract_content(response) -> str`
 
