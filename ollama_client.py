@@ -1,12 +1,17 @@
 import json
+import logging
 import urllib.request
 from typing import Any
 
 from config_loader import Config
+from session_logger import measure_duration
+
+logger = logging.getLogger(__name__)
 
 
 def create_client(config: Config) -> None:
     """Return None because Ollama uses direct HTTP requests."""
+    logger.debug("Created ollama client (no-op, using direct HTTP requests)")
     return None
 
 
@@ -42,8 +47,11 @@ def preload(config: Config, client: Any) -> None:
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
-        response.read()
+    with measure_duration() as elapsed:
+        with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
+            response.read()
+
+    logger.info("Model preloaded: model=%s duration_ms=%d", config.model, elapsed())
 
 
 def send_request(
@@ -64,7 +72,7 @@ def send_request(
         The parsed JSON response from the model as a dictionary.
 
     Raises:
-        ValueError: If the response was truncated by the context window.
+        ValueError: If the response was truncated by the context window or output limit.
     """
     endpoint = _get_endpoint(config)
     context_window_size = _get_context_window_size(config)
@@ -82,8 +90,11 @@ def send_request(
         "options": {
             "temperature": config.temperature,
             "num_ctx": context_window_size,
+            "num_predict": config.max_output_tokens,
         },
     }
+
+    logger.debug("Request payload: %s", payload)
 
     request_data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -92,17 +103,29 @@ def send_request(
         headers={"Content-Type": "application/json"},
     )
 
-    with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
-        response_data = json.loads(response.read().decode("utf-8"))
+    with measure_duration() as elapsed:
+        with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
+            response_data = json.loads(response.read().decode("utf-8"))
+
+    logger.info(
+        "Response received: model=%s duration_ms=%d input_tokens=%s output_tokens=%s",
+        config.model,
+        elapsed(),
+        response_data.get("prompt_eval_count"),
+        response_data.get("eval_count"),
+    )
+    logger.debug("Response: %s", response_data)
 
     if response_data.get("done_reason") == "length":
         raise ValueError(
             f"Response truncated before completion: "
             f"prompt={response_data.get('prompt_eval_count')} tokens, "
             f"output={response_data.get('eval_count')} tokens, "
-            f"num_ctx={context_window_size}. Increase "
-            f"provider_options.context_window_size or start a new session."
-        )
+            f"context_window_size={context_window_size}, "
+            f"max_output_tokens={config.max_output_tokens}. "
+            "Increase max_output_tokens if the output limit was reached; "
+            "otherwise increase provider_options.context_window_size "
+            "or start a new session.")
 
     return response_data
 
@@ -150,7 +173,7 @@ def _get_context_window_size(config: Config) -> int:
 
     Raises:
         ValueError: If provider_options.context_window_size is missing or not a
-            positive integer, or if max_tokens leaves no room for the prompt.
+            positive integer, or if max_output_tokens leaves no room for the prompt.
             Ollama clamps zero and negative values to a roughly 4-token window
             and returns HTTP 200 rather than rejecting them, so invalid values
             must be caught here.
@@ -163,9 +186,9 @@ def _get_context_window_size(config: Config) -> int:
             "positive integer"
         )
 
-    if config.max_tokens >= context_window_size:
+    if config.max_output_tokens >= context_window_size:
         raise ValueError(
-            f"max_tokens ({config.max_tokens}) must be smaller than "
+            f"max_output_tokens ({config.max_output_tokens}) must be smaller than "
             f"provider_options.context_window_size ({context_window_size}) to "
             f"leave room for the prompt"
         )

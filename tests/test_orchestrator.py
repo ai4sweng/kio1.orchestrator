@@ -1,6 +1,10 @@
 import json
+import logging
+import re
+from collections.abc import Iterator
 from formatter import format_json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -24,6 +28,7 @@ from openai_client import preload as preload_openai
 from openai_client import send_request as send_openai_request
 from prompt_loader import load_prompt
 from provider_client import load_provider
+from session_logger import generate_session_id, init_logger
 
 
 def make_config(
@@ -33,7 +38,7 @@ def make_config(
     temperature: float = 0.1,
     request_timeout: float = 120,
     keep_alive: int = -1,
-    max_tokens: int = 1024,
+    max_output_tokens: int = 1024,
     provider_options: dict[str, Any] | None = None,
 ) -> Config:
     """Create a configuration for provider tests.
@@ -45,7 +50,7 @@ def make_config(
         temperature: Sampling temperature.
         request_timeout: Request timeout in seconds.
         keep_alive: Ollama keep_alive value in seconds, or -1 to keep loaded.
-        max_tokens: Maximum number of generated output tokens.
+        max_output_tokens: Maximum number of generated output tokens.
         provider_options: Optional provider-specific configuration; defaults
             to an Ollama endpoint and context window when not provided.
     Returns:
@@ -66,7 +71,7 @@ def make_config(
         temperature=temperature,
         request_timeout=request_timeout,
         keep_alive=keep_alive,
-        max_tokens=max_tokens,
+        max_output_tokens=max_output_tokens,
         provider_options=provider_options,
     )
 
@@ -91,7 +96,7 @@ class TestConfigLoader:
             "chat_directory": "chats",
             "temperature": 0.1,
             "request_timeout": 120,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "custom_option": "custom-value",
             },
@@ -109,7 +114,7 @@ class TestConfigLoader:
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
-        assert config.max_tokens == 2048
+        assert config.max_output_tokens == 2048
         assert config.provider_options == {"custom_option": "custom-value"}
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
@@ -130,7 +135,7 @@ class TestConfigLoader:
             "temperature": 0.1,
             "keep_alive": -1,
             "request_timeout": 120,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "endpoint": "http://localhost:11434",
             },
@@ -161,7 +166,7 @@ class TestConfigLoader:
             "temperature": 0.1,
             "request_timeout": 120,
             "keep_alive": 600,
-            "max_tokens": 2048,
+            "max_output_tokens": 2048,
             "provider_options": {
                 "endpoint": "http://localhost:11434",
             },
@@ -234,7 +239,7 @@ class TestConfigLoader:
             temperature=0.1,
             request_timeout=120,
             keep_alive=-1,
-            max_tokens=2048,
+            max_output_tokens=2048,
             provider_options={"example": True},
         )
         assert config.provider == "test_provider"
@@ -242,7 +247,7 @@ class TestConfigLoader:
         assert config.temperature == 0.1
         assert config.request_timeout == 120
         assert config.keep_alive == -1
-        assert config.max_tokens == 2048
+        assert config.max_output_tokens == 2048
         assert config.provider_options == {"example": True}
 
 
@@ -414,18 +419,138 @@ class TestChatHistory:
         assert messages == []
 
 
+class TestSessionLogger:
+    """Tests for per-session logging setup."""
+
+    @pytest.fixture(autouse=True)
+    def restore_root_logger(self) -> Iterator[None]:
+        """Save root logger state before each test and restore it afterwards.
+
+        Returns:
+            An iterator that yields once, restoring handlers on teardown.
+        """
+        root = logging.getLogger()
+        original_handlers = root.handlers[:]
+        original_level = root.level
+
+        yield
+
+        for handler in root.handlers[:]:
+            if handler not in original_handlers:
+                handler.close()
+
+        root.handlers = original_handlers
+        root.setLevel(original_level)
+
+    def test_generate_session_id_format(self) -> None:
+        """Verify the session id is a timestamp followed by an 8-char hex suffix."""
+        assert re.fullmatch(r"\d{8}_\d{6}_[0-9a-f]{8}", generate_session_id())
+
+    def test_generate_session_id_is_unique(self) -> None:
+        """Verify consecutive session ids differ even within the same second."""
+        assert generate_session_id() != generate_session_id()
+
+    def test_init_logger_creates_log_file(self, tmp_path: Path) -> None:
+        """Verify the log file is created and named from the session id.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        log_dir = tmp_path / "logs"
+        init_logger(str(log_dir), "20260723_140211_a1b2c3d4")
+
+        assert log_dir.exists()
+        assert (log_dir / "log_20260723_140211_a1b2c3d4.log").exists()
+
+    def test_init_logger_handler_levels(self, tmp_path: Path) -> None:
+        """Verify the file handler captures DEBUG and the stream handler only ERROR.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        init_logger(str(tmp_path / "logs"), "session1")
+        handlers = logging.getLogger().handlers
+
+        assert len(handlers) == 2
+        file_handler, stream_handler = handlers
+        assert isinstance(file_handler, logging.FileHandler)
+        assert file_handler.level == logging.DEBUG
+        assert stream_handler.level == logging.ERROR
+
+    def test_init_logger_replaces_existing_handlers(self, tmp_path: Path) -> None:
+        """Verify repeated initialization does not accumulate duplicate handlers.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        init_logger(str(tmp_path / "logs"), "session1")
+        init_logger(str(tmp_path / "logs"), "session2")
+
+        assert len(logging.getLogger().handlers) == 2
+
+    def test_file_handler_records_debug_messages(self, tmp_path: Path) -> None:
+        """Verify DEBUG records reach the session log file.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        log_dir = tmp_path / "logs"
+        init_logger(str(log_dir), "session1")
+
+        logging.getLogger("example").debug("debug detail")
+
+        contents = (log_dir / "log_session1.log").read_text()
+        assert "DEBUG example debug detail" in contents
+
+    def test_stream_handler_emits_only_errors(
+        self, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Verify INFO stays out of the console while ERROR reaches stderr.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+            capsys: Pytest fixture capturing stdout and stderr.
+        """
+        init_logger(str(tmp_path / "logs"), "session1")
+
+        logger = logging.getLogger("example")
+        logger.info("info detail")
+        logger.error("error detail")
+
+        captured = capsys.readouterr()
+        assert "info detail" not in captured.err
+        assert "error detail" in captured.err
+
+    def test_third_party_loggers_are_quieted(self, tmp_path: Path) -> None:
+        """Verify SDK and HTTP client loggers are raised to WARNING.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        init_logger(str(tmp_path / "logs"), "session1")
+
+        for name in ("httpx", "httpcore", "openai", "anthropic"):
+            assert logging.getLogger(name).level == logging.WARNING
+
+    def test_log_file_pairs_with_chat_file(self, tmp_path: Path) -> None:
+        """Verify the log file and chat file share one session id.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        session_id = generate_session_id()
+        init_logger(str(tmp_path / "logs"), session_id)
+        chat_file = create_chat_file(str(tmp_path / "chats"), "system", session_id)
+
+        assert chat_file.name == f"chat_{session_id}.jsonl"
+        assert (tmp_path / "logs" / f"log_{session_id}.log").exists()
+
+
 class TestFormatter:
     """Tests for JSON formatting."""
 
     def test_format_json_pretty_prints(self) -> None:
-        """Verify JSON is formatted with 2-space indentation.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify JSON is formatted with 2-space indentation."""
         raw = '{"key":"value","num":42}'
         result = format_json(raw)
 
@@ -433,14 +558,7 @@ class TestFormatter:
         assert result == expected
 
     def test_format_json_nested(self) -> None:
-        """Verify nested JSON is properly formatted.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify nested JSON is properly formatted."""
         raw = '{"outer":{"inner":"value"}}'
         result = format_json(raw)
 
@@ -752,7 +870,7 @@ class TestOllamaClient:
 
         config = make_config(
             model="model",
-            max_tokens=2048,
+            max_output_tokens=2048,
             provider_options={
                 "endpoint": "http://localhost:11434",
                 "context_window_size": 16384,
@@ -762,6 +880,7 @@ class TestOllamaClient:
 
         payload = json.loads(mock_urlopen.call_args[0][0].data.decode("utf-8"))
         assert payload["options"]["num_ctx"] == 16384
+        assert payload["options"]["num_predict"] == 2048
 
     @patch("ollama_client.urllib.request.urlopen")
     def test_preload_sends_context_option(self, mock_urlopen: MagicMock) -> None:
@@ -831,11 +950,11 @@ class TestOllamaClient:
         with pytest.raises(ValueError, match="context_window_size"):
             send_request(config, None, "sys", [])
 
-    def test_send_request_rejects_max_tokens_exceeding_context(self) -> None:
-        """Verify max_tokens must leave room for the prompt."""
+    def test_send_request_rejects_max_output_tokens_exceeding_context(self) -> None:
+        """Verify max_output_tokens must leave room for the prompt."""
         config = make_config(
             model="model",
-            max_tokens=8192,
+            max_output_tokens=8192,
             provider_options={
                 "endpoint": "http://localhost:11434",
                 "context_window_size": 8192,
@@ -941,7 +1060,7 @@ class TestOpenAIClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="openai", temperature=0.2, max_tokens=500, provider_options={}
+            provider="openai", temperature=0.2, max_output_tokens=500, provider_options={}
         )
         send_openai_request(
             config,
@@ -954,6 +1073,7 @@ class TestOpenAIClient:
             model="test-model",
             messages=[{"role": "system", "content": "system prompt"}, *messages],
             temperature=0.2,
+            max_completion_tokens=500,
             response_format={
                 "type": "json_object",
             },
@@ -1099,7 +1219,7 @@ class TestAnthropicClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="anthropic", temperature=0.2, max_tokens=500, provider_options={}
+            provider="anthropic", temperature=0.2, max_output_tokens=500, provider_options={}
         )
         send_anthropic_request(
             config=config,
@@ -1189,6 +1309,148 @@ class TestAnthropicClient:
         client.models.retrieve.assert_called_once_with("claude-haiku-4-5")
 
 
+class TestProviderLogging:
+    """Tests for the INFO records emitted by provider modules."""
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_ollama_send_request_logs_duration_and_tokens(
+        self, mock_urlopen: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify the Ollama response line carries model, duration and token counts.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+            caplog: Pytest fixture capturing log records.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = json.dumps(
+            {
+                "message": {"content": "{}"},
+                "prompt_eval_count": 412,
+                "eval_count": 286,
+            }
+        ).encode("utf-8")
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="test-model")
+        with caplog.at_level(logging.INFO, logger="ollama_client"):
+            send_request(config, None, "sys", [])
+
+        assert "Response received:" in caplog.text
+        assert "model=test-model" in caplog.text
+        assert "input_tokens=412" in caplog.text
+        assert "output_tokens=286" in caplog.text
+        assert "duration_ms=" in caplog.text
+
+    @patch("ollama_client.urllib.request.urlopen")
+    def test_ollama_preload_logs_duration(
+        self, mock_urlopen: MagicMock, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify Ollama preload logs its own duration separately from requests.
+
+        Args:
+            mock_urlopen: Mock for `urllib.request.urlopen`.
+            caplog: Pytest fixture capturing log records.
+        """
+        mock_response = MagicMock()
+        mock_response.read.return_value = b""
+        mock_response.__enter__ = lambda s: s
+        mock_response.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_response
+
+        config = make_config(model="test-model")
+        with caplog.at_level(logging.INFO, logger="ollama_client"):
+            preload(config, None)
+
+        assert "Model preloaded:" in caplog.text
+        assert "model=test-model" in caplog.text
+        assert "duration_ms=" in caplog.text
+        assert "Response received:" not in caplog.text
+
+    def test_openai_send_request_logs_duration_and_tokens(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify the OpenAI response line reads `usage.prompt_tokens`/`completion_tokens`.
+
+        Args:
+            caplog: Pytest fixture capturing log records.
+        """
+        client = MagicMock()
+        client.chat.completions.create.return_value = SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=412, completion_tokens=286),
+            choices=[SimpleNamespace(finish_reason="stop")],
+        )
+
+        config = make_config(provider="openai", model="gpt-4o-mini")
+        with caplog.at_level(logging.INFO, logger="openai_client"):
+            send_openai_request(config, client, "sys", [])
+
+        assert "Response received:" in caplog.text
+        assert "model=gpt-4o-mini" in caplog.text
+        assert "input_tokens=412" in caplog.text
+        assert "output_tokens=286" in caplog.text
+
+    def test_openai_preload_logs_duration(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify OpenAI preload logs a distinct verification event.
+
+        Args:
+            caplog: Pytest fixture capturing log records.
+        """
+        client = MagicMock()
+        config = make_config(provider="openai", model="gpt-4o-mini")
+
+        with caplog.at_level(logging.INFO, logger="openai_client"):
+            preload_openai(config, client)
+
+        assert "Model verified:" in caplog.text
+        assert "model=gpt-4o-mini" in caplog.text
+        assert "duration_ms=" in caplog.text
+
+    def test_anthropic_send_request_logs_duration_and_tokens(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify the Anthropic response line reads `usage.input_tokens`/`output_tokens`.
+
+        Args:
+            caplog: Pytest fixture capturing log records.
+        """
+        client = MagicMock()
+        client.messages.create.return_value = SimpleNamespace(
+            usage=SimpleNamespace(input_tokens=412, output_tokens=286)
+        )
+
+        config = make_config(provider="anthropic", model="claude-haiku-4-5")
+        with caplog.at_level(logging.INFO, logger="anthropic_client"):
+            send_anthropic_request(config, client, "sys", [])
+
+        assert "Response received:" in caplog.text
+        assert "model=claude-haiku-4-5" in caplog.text
+        assert "input_tokens=412" in caplog.text
+        assert "output_tokens=286" in caplog.text
+
+    def test_anthropic_preload_logs_duration(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Verify Anthropic preload logs a distinct verification event.
+
+        Args:
+            caplog: Pytest fixture capturing log records.
+        """
+        client = MagicMock()
+        config = make_config(provider="anthropic", model="claude-haiku-4-5")
+
+        with caplog.at_level(logging.INFO, logger="anthropic_client"):
+            preload_anthropic(config, client)
+
+        assert "Model verified:" in caplog.text
+        assert "model=claude-haiku-4-5" in caplog.text
+        assert "duration_ms=" in caplog.text
+
+
 class TestProviderLoading:
     """Tests for dynamic provider discovery."""
 
@@ -1205,9 +1467,6 @@ class TestProviderLoading:
 
         Args:
             provider_name: Name of the provider module to load.
-
-        Returns:
-            None.
         """
         provider = load_provider(
             provider_name, frozenset({"ollama", "openai", "anthropic"})
@@ -1219,39 +1478,18 @@ class TestProviderLoading:
         assert callable(provider.extract_content)
 
     def test_load_provider_rejects_invalid_name(self) -> None:
-        """Verify unsafe module names are rejected.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify unsafe module names are rejected."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("../openai", frozenset({"ollama", "openai", "anthropic"}))
 
     def test_load_provider_rejects_unknown_provider(self) -> None:
-        """Verify a provider outside the allowlist produces a useful error.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify a provider outside the allowlist produces a useful error."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider(
                 "missing_provider", frozenset({"ollama", "openai", "anthropic"})
             )
 
     def test_load_provider_respects_restricted_allowlist(self) -> None:
-        """Verify a provider excluded from the caller's allowlist is rejected.
-
-        Args:
-            None.
-
-        Returns:
-            None.
-        """
+        """Verify a provider excluded from the caller's allowlist is rejected."""
         with pytest.raises(ValueError, match="Invalid provider name"):
             load_provider("openai", frozenset({"ollama"}))

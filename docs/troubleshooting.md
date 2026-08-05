@@ -51,6 +51,47 @@ The system prompt asks providers to return JSON only. The formatter also removes
 
 ## Response truncated
 
-A request failing with `Response truncated before completion` means the prompt plus the generated output exceeded `provider_options.context_window_size`. Since each turn re-sends the whole transcript, long conversations reach the limit eventually.
+A request failing with `Response truncated before completion` reached either `max_output_tokens` or `provider_options.context_window_size`. Since each turn re-sends the whole transcript, long conversations eventually consume the available context.
 
-Either raise `context_window_size` in `config.json` or start a new session. The error reports the actual token counts so you can see how much headroom is missing.
+Increase `max_output_tokens` if the output cap was reached. Otherwise, raise `context_window_size` or start a new session. The error reports both limits and the actual token counts.
+
+## Reading the logs
+
+Each run writes `logs/log_<session_id>.log`, where `session_id` is `<YYYYMMDD>_<HHMMSS>_<8-char-uuid>`. The same id names that session's `chats/chat_<session_id>.jsonl`, so the transcript and the log can be read side by side.
+
+Each line is UTC ISO 8601 with milliseconds, then the session id, level, module, and message:
+
+```
+2026-07-24T09:19:43.465Z 20260724_101943_ff849b40 INFO main Session started: session_id=20260724_101943_ff849b40
+2026-07-24T09:19:43.466Z 20260724_101943_ff849b40 INFO config_loader Config loaded: provider=ollama model=ministral-3:8b prompt_path=prompts/kio1_system_prompt_ver1.txt
+2026-07-24T09:19:43.712Z 20260724_101943_ff849b40 INFO ollama_client Model preloaded: model=ministral-3:8b duration_ms=199
+2026-07-24T09:19:56.220Z 20260724_101943_ff849b40 INFO main Turn started: turn=1
+2026-07-24T09:21:15.523Z 20260724_101943_ff849b40 INFO ollama_client Response received: model=ministral-3:8b duration_ms=79303 input_tokens=2280 output_tokens=550
+2026-07-24T09:21:20.108Z 20260724_101943_ff849b40 INFO main Session ended: turns=1
+```
+
+Timestamps are UTC, matching the `created_at` values inside provider responses. The console shows only `ERROR`; everything else lives in the file.
+
+| Level | Contents |
+|-------|----------|
+| `DEBUG` | Full request payloads and model responses, including message text |
+| `INFO` | Session and turn markers, config, provider loaded, model preloaded/verified, per-request duration and token counts |
+| `WARNING` | Recoverable issues, such as the formatter falling back to `ast.literal_eval` |
+| `ERROR` | Startup failures and failed requests, with tracebacks |
+
+Useful greps:
+
+```bash
+LOG=logs/$(ls -t logs/ | head -1)
+
+grep "Response received:" $LOG   # duration and tokens per turn
+grep -c "Turn started:" $LOG     # turns attempted this session
+tail -1 $LOG                     # "Session ended: turns=N" if it exited cleanly
+grep ERROR logs/*.log            # failures across all sessions
+```
+
+A log containing `Startup failed` with no `Session ended` line never reached the prompt. A log with neither was killed mid-session.
+
+`input_tokens` grows every turn because the whole transcript is re-sent, while `output_tokens` stays roughly flat — the two diverging shows the cost of replaying conversation history.
+
+Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request.

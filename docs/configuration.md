@@ -13,10 +13,10 @@ All application settings are stored in `config.json` at the project root.
 | `chat_directory` | string | Directory for chat history files |
 | `temperature` | float | Sampling temperature (lower = more deterministic) |
 | `request_timeout` | float | Request timeout in seconds |
-| `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded) | `-1` |
-| `max_tokens` | int | Maximum number of generated output tokens; does not limit input context |
+| `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded; default: `-1`) |
+| `max_output_tokens` | int | Maximum number of generated output tokens; must be positive (default: `4096`) |
 | `provider_options.endpoint` | string | Ollama base URL (required for Ollama) |
-| `provider_options.context_window_size` | int | Ollama context window in tokens (required for Ollama); must be a positive integer larger than `max_tokens` |
+| `provider_options.context_window_size` | int | Ollama context window in tokens (required for Ollama); must be larger than `max_output_tokens` |
 
 ## Example `config.json`
 
@@ -29,8 +29,9 @@ All application settings are stored in `config.json` at the project root.
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
-        "keep_alive": -1,
-        "provider_options": {
+    "keep_alive": -1,
+    "max_output_tokens": 4096,
+    "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384
     }
@@ -76,6 +77,7 @@ Example configuration:
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
+    "max_output_tokens": 2048
 }
 ```
 
@@ -102,7 +104,7 @@ Example configuration:
     "chat_directory": "chats",
     "temperature": 0.1,
     "request_timeout": 120,
-    "max_tokens": 2048
+    "max_output_tokens": 2048
 }
 ```
 
@@ -112,7 +114,7 @@ The formatter accepts both plain JSON and JSON wrapped in a Markdown code fence.
 
 `provider_options.context_window_size` sets the total token budget for a request — the system prompt, the whole conversation so far, and the generated response all share it. It maps to Ollama's `num_ctx` option. Because every turn re-sends the full transcript, this is what limits how long a conversation can run.
 
-`max_tokens` maps to Ollama's `num_predict` and caps only the output, so it must be smaller than `context_window_size` to leave room for the prompt. However this is not currently implemented and connected to the system. In a future implementation this will be decided whether to keep in the system.
+`max_output_tokens` caps the generated response. It maps to Ollama's `num_predict`, OpenAI's `max_completion_tokens`, and Anthropic's `max_tokens`. For Ollama, it must be smaller than `context_window_size` to leave room for the prompt.
 
 Ollama's own default is 4096 regardless of what the model supports (`ministral-3:8b` supports 262144), which is why an explicit value is required. Raising it costs RAM, since the cache is allocated when the model loads — 16384 comfortably fits roughly twenty turns.
 
