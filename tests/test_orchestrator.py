@@ -1060,7 +1060,10 @@ class TestOpenAIClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="openai", temperature=0.2, max_output_tokens=500, provider_options={}
+            provider="openai",
+            temperature=0.2,
+            max_output_tokens=500,
+            provider_options={},
         )
         send_openai_request(
             config,
@@ -1219,7 +1222,10 @@ class TestAnthropicClient:
         messages = [{"role": "user", "content": "Build an app"}]
 
         config = make_config(
-            provider="anthropic", temperature=0.2, max_output_tokens=500, provider_options={}
+            provider="anthropic",
+            temperature=0.2,
+            max_output_tokens=500,
+            provider_options={},
         )
         send_anthropic_request(
             config=config,

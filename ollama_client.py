@@ -125,7 +125,8 @@ def send_request(
             f"max_output_tokens={config.max_output_tokens}. "
             "Increase max_output_tokens if the output limit was reached; "
             "otherwise increase provider_options.context_window_size "
-            "or start a new session.")
+            "or start a new session."
+        )
 
     return response_data
 
