@@ -3,6 +3,12 @@ import json
 import logging
 from typing import Any
 
+from telemetry import (
+    record_format_fallback,
+    record_workflow_plan,
+    trace_operation,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -21,25 +27,64 @@ def format_json(raw_json: str) -> str:
     Raises:
         ValueError: If the content parses as neither JSON nor a Python literal.
     """
-    normalized_content = _strip_markdown_fence(raw_json)
-    try:
-        parsed: Any = json.loads(normalized_content)
-    except json.JSONDecodeError:
-        logger.warning("Standard JSON parsing failed, falling back to ast.literal_eval")
+    with trace_operation("kio1.response.format"):
+        normalized_content = _strip_markdown_fence(raw_json)
         try:
-            parsed = ast.literal_eval(normalized_content)
-        except (ValueError, SyntaxError) as error:
-            raise ValueError(
-                f"Content is neither valid JSON nor a Python literal: {error}"
-            ) from error
-    return json.dumps(parsed, indent=2, ensure_ascii=False)
+            parsed: Any = json.loads(normalized_content)
+        except json.JSONDecodeError:
+            logger.warning(
+                "Standard JSON parsing failed, falling back to ast.literal_eval"
+            )
+            try:
+                parsed = ast.literal_eval(normalized_content)
+            except (ValueError, SyntaxError) as error:
+                raise ValueError(
+                    f"Content is neither valid JSON nor a Python literal: {error}"
+                ) from error
+
+            record_format_fallback()
+
+        _record_workflow_metadata(parsed)
+
+        return json.dumps(parsed, indent=2, ensure_ascii=False)
+
+
+def _record_workflow_metadata(parsed: Any) -> None:
+    """Record non-content workflow structure from a parsed response.
+
+    Args:
+        parsed: Parsed response value.
+
+    Returns:
+        None.
+    """
+    if not isinstance(parsed, dict):
+        return
+
+    workflow_id = parsed.get("workflow_id")
+    execution_mode = parsed.get("execution_mode")
+    steps = parsed.get("steps")
+
+    if (
+        not isinstance(workflow_id, str)
+        or not workflow_id
+        or not isinstance(execution_mode, str)
+        or not isinstance(steps, list)
+    ):
+        return
+
+    record_workflow_plan(
+        workflow_id=workflow_id,
+        execution_mode=execution_mode,
+        step_count=len(steps),
+    )
 
 
 def _strip_markdown_fence(content: str) -> str:
     """Remove an optional Markdown code fence.
 
     Args:
-    content: Raw text that may be wrapped in a Markdown code fence.
+        content: Raw text that may be wrapped in a Markdown code fence.
 
     Returns:
         The content with the surrounding code fence removed, if present;

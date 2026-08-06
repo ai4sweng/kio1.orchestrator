@@ -20,7 +20,7 @@ from chat_history import (
     create_chat_file,
     load_messages,
 )
-from config_loader import Config, load_config
+from config_loader import Config, TelemetryConfig, load_config
 from ollama_client import extract_content, preload, send_request
 from openai_client import create_client as create_openai_client
 from openai_client import extract_content as extract_openai_content
@@ -97,6 +97,13 @@ class TestConfigLoader:
             "temperature": 0.1,
             "request_timeout": 120,
             "max_output_tokens": 2048,
+            "telemetry": {
+                "enabled": True,
+                "service_name": "test-orchestrator",
+                "otlp_http_endpoint": "http://collector:4318/",
+                "metric_export_interval_ms": 2500,
+                "trace_sample_ratio": 0.5,
+            },
             "provider_options": {
                 "custom_option": "custom-value",
             },
@@ -115,7 +122,37 @@ class TestConfigLoader:
         assert config.request_timeout == 120
         assert config.keep_alive == -1
         assert config.max_output_tokens == 2048
+        assert config.telemetry == TelemetryConfig(
+            enabled=True,
+            service_name="test-orchestrator",
+            otlp_http_endpoint="http://collector:4318",
+            metric_export_interval_ms=2500,
+            trace_sample_ratio=0.5,
+        )
         assert config.provider_options == {"custom_option": "custom-value"}
+
+    def test_load_config_uses_telemetry_defaults(self, tmp_path: Path) -> None:
+        """Verify telemetry is safely disabled when its section is omitted.
+
+        Args:
+            tmp_path: Pytest temporary directory fixture.
+        """
+        config_data = {
+            "provider": "openai",
+            "allowed_providers": ["ollama", "openai", "anthropic"],
+            "model": "test-model",
+            "prompt_path": "prompts/test.txt",
+            "chat_directory": "chats",
+            "temperature": 0.1,
+            "request_timeout": 120,
+            "max_output_tokens": 2048,
+        }
+        config_file = tmp_path / "config.json"
+        config_file.write_text(json.dumps(config_data))
+
+        config = load_config(str(config_file))
+
+        assert config.telemetry == TelemetryConfig()
 
     def test_load_config_rejects_unknown_provider(self, tmp_path: Path) -> None:
         """Verify an unknown provider value raises a clear error

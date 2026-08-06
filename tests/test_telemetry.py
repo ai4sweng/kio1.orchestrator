@@ -1,0 +1,576 @@
+import json
+from formatter import format_json
+from types import SimpleNamespace
+from typing import Any
+from unittest.mock import MagicMock, call, patch
+
+import pytest
+from opentelemetry.trace import StatusCode
+
+import telemetry
+from anthropic_client import send_request as send_anthropic_request
+from config_loader import Config, TelemetryConfig
+from ollama_client import send_request as send_ollama_request
+from openai_client import send_request as send_openai_request
+
+
+def _recording_tracer() -> tuple[MagicMock, MagicMock]:
+    """Create a mocked tracer returning a recording span."""
+
+    span = MagicMock()
+    span.is_recording.return_value = True
+
+    span_context = MagicMock()
+    span_context.__enter__.return_value = span
+    span_context.__exit__.return_value = False
+
+    tracer = MagicMock()
+    tracer.start_as_current_span.return_value = span_context
+
+    return tracer, span
+
+
+def _provider_config(provider: str) -> Config:
+    """Create provider configuration for telemetry mapping tests."""
+
+    provider_options: dict[str, Any] = {}
+
+    if provider == "ollama":
+        provider_options = {
+            "endpoint": "http://localhost:11434",
+            "context_window_size": 16384,
+        }
+
+    return Config(
+        provider=provider,
+        allowed_providers=frozenset({"ollama", "openai", "anthropic"}),
+        model="requested-model",
+        prompt_path="prompt.txt",
+        chat_directory="chats",
+        temperature=0.1,
+        request_timeout=120,
+        keep_alive=-1,
+        max_output_tokens=1024,
+        provider_options=provider_options,
+    )
+
+
+def test_interrupted_turn_is_recorded_as_error() -> None:
+    """Verify an interrupted request is not reported as successful."""
+
+    tracer, span = _recording_tracer()
+    instruments = SimpleNamespace(
+        turns=MagicMock(),
+        turn_duration=MagicMock(),
+    )
+
+    with (
+        patch.object(telemetry, "_tracer", tracer),
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(
+            telemetry,
+            "perf_counter",
+            side_effect=[10.0, 11.0],
+        ),
+    ):
+        with pytest.raises(KeyboardInterrupt):
+            with telemetry.trace_turn(
+                session_id="session-123",
+                turn_number=1,
+                provider="ollama",
+                model="requested-model",
+            ):
+                raise KeyboardInterrupt()
+
+    _, metric_attributes = instruments.turns.add.call_args.args
+
+    assert metric_attributes["kio1.status"] == "error"
+    assert metric_attributes["error.type"] == "KeyboardInterrupt"
+    span.set_attribute.assert_any_call(
+        "error.type",
+        "KeyboardInterrupt",
+    )
+
+
+@patch("ollama_client.record_gen_ai_response")
+@patch("ollama_client.urllib.request.urlopen")
+def test_ollama_maps_response_telemetry_before_truncation(
+    urlopen: MagicMock,
+    record_response: MagicMock,
+) -> None:
+    """Verify Ollama response fields are normalized before raising."""
+
+    response = MagicMock()
+    response.read.return_value = json.dumps(
+        {
+            "model": "returned-model",
+            "message": {"content": "{}"},
+            "done_reason": "length",
+            "prompt_eval_count": 3432,
+            "eval_count": 664,
+        }
+    ).encode("utf-8")
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+    urlopen.return_value = response
+
+    config = _provider_config("ollama")
+
+    with pytest.raises(ValueError, match="Response truncated"):
+        send_ollama_request(config, None, "system", [])
+
+    record_response.assert_called_once_with(
+        provider="ollama",
+        request_model="requested-model",
+        input_tokens=3432,
+        output_tokens=664,
+        response_model="returned-model",
+        finish_reason="length",
+        truncated=True,
+        truncation_reason="length",
+    )
+
+
+@patch("openai_client.record_gen_ai_response")
+def test_openai_maps_response_telemetry_before_truncation(
+    record_response: MagicMock,
+) -> None:
+    """Verify OpenAI response fields are normalized before raising."""
+
+    response = SimpleNamespace(
+        id="response-openai",
+        model="returned-model",
+        usage=SimpleNamespace(
+            prompt_tokens=100,
+            completion_tokens=25,
+        ),
+        choices=[SimpleNamespace(finish_reason="length")],
+    )
+    client = MagicMock()
+    client.chat.completions.create.return_value = response
+
+    config = _provider_config("openai")
+
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        send_openai_request(config, client, "system", [])
+
+    record_response.assert_called_once_with(
+        provider="openai",
+        request_model="requested-model",
+        input_tokens=100,
+        output_tokens=25,
+        response_model="returned-model",
+        response_id="response-openai",
+        finish_reason="length",
+        truncated=True,
+        truncation_reason="max_output_tokens",
+    )
+
+
+@patch("anthropic_client.record_gen_ai_response")
+def test_anthropic_maps_response_telemetry_before_truncation(
+    record_response: MagicMock,
+) -> None:
+    """Verify Anthropic response fields are normalized before raising."""
+
+    response = SimpleNamespace(
+        id="response-anthropic",
+        model="returned-model",
+        usage=SimpleNamespace(
+            input_tokens=120,
+            output_tokens=30,
+        ),
+        stop_reason="max_tokens",
+    )
+    client = MagicMock()
+    client.messages.create.return_value = response
+
+    config = _provider_config("anthropic")
+
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        send_anthropic_request(config, client, "system", [])
+
+    record_response.assert_called_once_with(
+        provider="anthropic",
+        request_model="requested-model",
+        input_tokens=120,
+        output_tokens=30,
+        response_model="returned-model",
+        response_id="response-anthropic",
+        finish_reason="max_tokens",
+        truncated=True,
+        truncation_reason="max_output_tokens",
+    )
+
+
+def test_disabled_telemetry_does_not_create_exporters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify disabled telemetry performs no exporter initialization."""
+
+    monkeypatch.setattr(telemetry, "_tracer_provider", None)
+    monkeypatch.setattr(telemetry, "_meter_provider", None)
+
+    with (
+        patch.object(telemetry, "OTLPSpanExporter") as span_exporter,
+        patch.object(telemetry, "OTLPMetricExporter") as metric_exporter,
+    ):
+        telemetry.init_telemetry(TelemetryConfig())
+
+    span_exporter.assert_not_called()
+    metric_exporter.assert_not_called()
+
+
+def test_init_telemetry_builds_otlp_signal_endpoints(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify traces and metrics use their respective OTLP HTTP paths."""
+
+    for attribute_name in (
+        "_tracer_provider",
+        "_meter_provider",
+        "_tracer",
+        "_meter",
+        "_instruments",
+    ):
+        monkeypatch.setattr(
+            telemetry,
+            attribute_name,
+            getattr(telemetry, attribute_name),
+        )
+
+    monkeypatch.setattr(telemetry, "_tracer_provider", None)
+    monkeypatch.setattr(telemetry, "_meter_provider", None)
+
+    span_exporter = MagicMock()
+    metric_exporter = MagicMock()
+    span_processor = MagicMock()
+    metric_reader = MagicMock()
+    tracer_provider = MagicMock()
+    meter_provider = MagicMock()
+    tracer = MagicMock()
+    meter = MagicMock()
+    instruments = MagicMock()
+
+    tracer_provider.get_tracer.return_value = tracer
+    meter_provider.get_meter.return_value = meter
+
+    with (
+        patch.object(
+            telemetry,
+            "OTLPSpanExporter",
+            return_value=span_exporter,
+        ) as span_exporter_factory,
+        patch.object(
+            telemetry,
+            "OTLPMetricExporter",
+            return_value=metric_exporter,
+        ) as metric_exporter_factory,
+        patch.object(
+            telemetry,
+            "BatchSpanProcessor",
+            return_value=span_processor,
+        ) as span_processor_factory,
+        patch.object(
+            telemetry,
+            "PeriodicExportingMetricReader",
+            return_value=metric_reader,
+        ) as metric_reader_factory,
+        patch.object(
+            telemetry,
+            "TracerProvider",
+            return_value=tracer_provider,
+        ) as tracer_provider_factory,
+        patch.object(
+            telemetry,
+            "MeterProvider",
+            return_value=meter_provider,
+        ) as meter_provider_factory,
+        patch.object(telemetry.trace, "set_tracer_provider") as set_tracer_provider,
+        patch.object(telemetry.metrics, "set_meter_provider") as set_meter_provider,
+        patch.object(
+            telemetry,
+            "_create_instruments",
+            return_value=instruments,
+        ) as create_instruments,
+    ):
+        telemetry.init_telemetry(
+            TelemetryConfig(
+                enabled=True,
+                service_name="test-orchestrator",
+                otlp_http_endpoint="http://collector:4318",
+                metric_export_interval_ms=2500,
+                trace_sample_ratio=0.25,
+            )
+        )
+
+    span_exporter_factory.assert_called_once_with(
+        endpoint="http://collector:4318/v1/traces"
+    )
+    metric_exporter_factory.assert_called_once_with(
+        endpoint="http://collector:4318/v1/metrics"
+    )
+
+    span_processor_factory.assert_called_once_with(span_exporter)
+    tracer_provider.add_span_processor.assert_called_once_with(span_processor)
+
+    metric_reader_factory.assert_called_once_with(
+        metric_exporter,
+        export_interval_millis=2500,
+    )
+
+    tracer_provider_arguments = tracer_provider_factory.call_args.kwargs
+    assert tracer_provider_arguments["shutdown_on_exit"] is False
+    assert (
+        tracer_provider_arguments["resource"].attributes["service.name"]
+        == "test-orchestrator"
+    )
+
+    meter_provider_factory.assert_called_once_with(
+        resource=tracer_provider_arguments["resource"],
+        metric_readers=[metric_reader],
+        shutdown_on_exit=False,
+    )
+
+    set_tracer_provider.assert_called_once_with(tracer_provider)
+    set_meter_provider.assert_called_once_with(meter_provider)
+    create_instruments.assert_called_once_with(meter)
+
+    assert telemetry._tracer is tracer
+    assert telemetry._meter is meter
+    assert telemetry._instruments is instruments
+
+
+def test_trace_operation_marks_errors_without_recording_messages() -> None:
+    """Verify spans receive only the exception type and error status."""
+
+    tracer, span = _recording_tracer()
+
+    with patch.object(telemetry, "_tracer", tracer):
+        with pytest.raises(ValueError, match="sensitive error text"):
+            with telemetry.trace_operation("test.operation"):
+                raise ValueError("sensitive error text")
+
+    span.set_attribute.assert_called_once_with("error.type", "ValueError")
+    span.record_exception.assert_not_called()
+
+    status = span.set_status.call_args.args[0]
+    assert status.status_code is StatusCode.ERROR
+
+    start_arguments = tracer.start_as_current_span.call_args.kwargs
+    assert start_arguments["record_exception"] is False
+    assert start_arguments["set_status_on_exception"] is False
+
+
+def test_turn_metrics_exclude_session_identifiers() -> None:
+    """Verify session IDs remain in traces and never become metric labels."""
+
+    tracer, _ = _recording_tracer()
+    instruments = SimpleNamespace(
+        turns=MagicMock(),
+        turn_duration=MagicMock(),
+    )
+
+    with (
+        patch.object(telemetry, "_tracer", tracer),
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(
+            telemetry,
+            "perf_counter",
+            side_effect=[10.0, 12.5],
+        ),
+    ):
+        with telemetry.trace_turn(
+            session_id="session-123",
+            turn_number=4,
+            provider="ollama",
+            model="test-model",
+        ):
+            pass
+
+    instruments.turns.add.assert_called_once()
+    _, turn_attributes = instruments.turns.add.call_args.args
+
+    assert turn_attributes == {
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "test-model",
+        "kio1.status": "success",
+    }
+    assert "gen_ai.conversation.id" not in turn_attributes
+    assert "kio1.turn.number" not in turn_attributes
+
+    instruments.turn_duration.record.assert_called_once_with(
+        2.5,
+        turn_attributes,
+    )
+
+    span_attributes = tracer.start_as_current_span.call_args.kwargs["attributes"]
+    assert span_attributes["gen_ai.conversation.id"] == "session-123"
+    assert span_attributes["kio1.turn.number"] == 4
+
+
+def test_record_gen_ai_response_records_tokens_and_truncation() -> None:
+    """Verify normalized model-response metrics and trace attributes."""
+
+    span = MagicMock()
+    span.is_recording.return_value = True
+
+    instruments = SimpleNamespace(
+        gen_ai_token_usage=MagicMock(),
+        response_truncations=MagicMock(),
+    )
+
+    with (
+        patch.object(
+            telemetry.trace,
+            "get_current_span",
+            return_value=span,
+        ),
+        patch.object(telemetry, "_instruments", instruments),
+    ):
+        telemetry.record_gen_ai_response(
+            provider="ollama",
+            request_model="requested-model",
+            input_tokens=21,
+            output_tokens=8,
+            response_model="returned-model",
+            response_id="response-123",
+            finish_reason="length",
+            truncated=True,
+            truncation_reason="length",
+        )
+
+    base_attributes = {
+        "gen_ai.provider.name": "ollama",
+        "gen_ai.request.model": "requested-model",
+        "gen_ai.response.model": "returned-model",
+    }
+
+    assert instruments.gen_ai_token_usage.record.call_args_list == [
+        call(
+            21,
+            {
+                **base_attributes,
+                "gen_ai.token.type": "input",
+            },
+        ),
+        call(
+            8,
+            {
+                **base_attributes,
+                "gen_ai.token.type": "output",
+            },
+        ),
+    ]
+
+    instruments.response_truncations.add.assert_called_once_with(
+        1,
+        {
+            **base_attributes,
+            "kio1.truncation.reason": "length",
+        },
+    )
+
+    span.set_attribute.assert_any_call(
+        "gen_ai.response.finish_reasons",
+        ["length"],
+    )
+    span.set_attribute.assert_any_call("gen_ai.usage.input_tokens", 21)
+    span.set_attribute.assert_any_call("gen_ai.usage.output_tokens", 8)
+    span.set_attribute.assert_any_call("kio1.response.truncated", True)
+
+
+def test_workflow_metrics_bound_execution_mode_and_exclude_id() -> None:
+    """Verify workflow identifiers are trace-only and labels stay bounded."""
+
+    span = MagicMock()
+    span.is_recording.return_value = True
+
+    instruments = SimpleNamespace(
+        workflow_plans=MagicMock(),
+        workflow_step_count=MagicMock(),
+    )
+    workflow_id = "wf-" + ("x" * 200)
+
+    with (
+        patch.object(
+            telemetry.trace,
+            "get_current_span",
+            return_value=span,
+        ),
+        patch.object(telemetry, "_instruments", instruments),
+    ):
+        telemetry.record_workflow_plan(
+            workflow_id=workflow_id,
+            execution_mode="unexpected-mode",
+            step_count=3,
+        )
+
+    metric_attributes = {
+        "kio1.workflow.execution_mode": "unknown",
+    }
+    instruments.workflow_plans.add.assert_called_once_with(
+        1,
+        metric_attributes,
+    )
+    instruments.workflow_step_count.record.assert_called_once_with(
+        3,
+        metric_attributes,
+    )
+
+    assert "kio1.workflow.id" not in metric_attributes
+    span.set_attribute.assert_any_call(
+        "kio1.workflow.id",
+        workflow_id[:128],
+    )
+
+
+def test_formatter_records_fallback_and_workflow_structure() -> None:
+    """Verify formatter telemetry excludes explanation and step content."""
+
+    raw_response = (
+        "{'workflow_id': 'wf-1', "
+        "'execution_mode': 'parallel', "
+        "'steps': [{}, {}], "
+        "'explanation': 'do not export this'}"
+    )
+
+    with (
+        patch("formatter.record_format_fallback") as record_fallback,
+        patch("formatter.record_workflow_plan") as record_plan,
+    ):
+        formatted = format_json(raw_response)
+
+    assert '"workflow_id": "wf-1"' in formatted
+    record_fallback.assert_called_once_with()
+    record_plan.assert_called_once_with(
+        workflow_id="wf-1",
+        execution_mode="parallel",
+        step_count=2,
+    )
+
+
+def test_shutdown_continues_when_metric_shutdown_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify trace shutdown still runs after a metric shutdown error."""
+
+    meter_provider = MagicMock()
+    meter_provider.shutdown.side_effect = RuntimeError("metric shutdown failed")
+    tracer_provider = MagicMock()
+
+    monkeypatch.setattr(
+        telemetry,
+        "_meter_provider",
+        meter_provider,
+    )
+    monkeypatch.setattr(
+        telemetry,
+        "_tracer_provider",
+        tracer_provider,
+    )
+
+    telemetry.shutdown_telemetry()
+
+    meter_provider.shutdown.assert_called_once_with()
+    tracer_provider.shutdown.assert_called_once_with()

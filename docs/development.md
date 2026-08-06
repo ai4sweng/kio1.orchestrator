@@ -4,6 +4,7 @@
 
 - Python 3.10+
 - [Ollama](https://ollama.com) installed and running
+- Docker with Docker Compose (optional, for observability integration testing)
 
 ## Setup
 
@@ -35,7 +36,9 @@ ollama_client.py     - Ollama HTTP client
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON pretty-printing
 session_logger.py    - Per-session log setup and duration measurement
+telemetry.py         - OpenTelemetry tracing and metrics
 config.json          - Application settings
+observability/       - Collector, Tempo, and Prometheus configuration
 prompts/             - System prompt files
 chats/               - Session history (auto-created, gitignored)
 logs/                - Session logs (auto-created, gitignored)
@@ -56,7 +59,7 @@ Or directly:
 pytest tests/ -v
 ```
 
-All tests use mocks for the Ollama API and temporary directories for file I/O. No running Ollama instance is required for testing.
+Tests use mocks for provider APIs and telemetry exporters, along with temporary directories for file I/O. No running model provider or observability service is required for unit testing.
 
 ## Adding a New Module
 
@@ -97,7 +100,8 @@ Run `make help` to see all targets.
 
 The project intentionally minimizes external dependencies:
 
-- **Runtime**: `openai >= 1.66.0`, `anthropic >= 0.18.1` (Ollama uses the standard library only — no extra dependency).
+- **Runtime providers**: `openai >= 1.66.0`, `anthropic >= 0.18.1`; Ollama uses `urllib.request` from the standard library.
+- **Runtime observability**: `opentelemetry-api >= 1.44.0`, `opentelemetry-sdk >= 1.44.0`, `opentelemetry-exporter-otlp-proto-http >= 1.44.0`, all constrained below version `2.0.0`.
 - **Testing**: `pytest >= 7.0`, `pytest-cov >= 4.0`.
 - **Formatting**: `black >= 24.0`, `isort >= 5.13`.
 - **Linting**: `ruff >= 0.4`.

@@ -17,6 +17,12 @@ All application settings are stored in `config.json` at the project root.
 | `max_output_tokens` | int | Maximum number of generated output tokens; must be positive (default: `4096`) |
 | `provider_options.endpoint` | string | Ollama base URL (required for Ollama) |
 | `provider_options.context_window_size` | int | Ollama context window in tokens (required for Ollama); must be larger than `max_output_tokens` |
+| `telemetry` | object | Optional OpenTelemetry configuration; telemetry is disabled when omitted |
+| `telemetry.enabled` | boolean | Enables trace and metric export (default: `false`) |
+| `telemetry.service_name` | string | Non-empty service name attached to exported telemetry (default: `kio1-orchestrator`) |
+| `telemetry.otlp_http_endpoint` | string | OpenTelemetry Collector OTLP/HTTP base URL (default: `http://localhost:4318`) |
+| `telemetry.metric_export_interval_ms` | int | Positive metric-export interval in milliseconds (default: `5000`) |
+| `telemetry.trace_sample_ratio` | number | Fraction of traces sampled, from `0.0` to `1.0` (default: `1.0`) |
 
 ## Example `config.json`
 
@@ -31,6 +37,13 @@ All application settings are stored in `config.json` at the project root.
     "request_timeout": 120,
     "keep_alive": -1,
     "max_output_tokens": 4096,
+    "telemetry": {
+        "enabled": false,
+        "service_name": "kio1-orchestrator",
+        "otlp_http_endpoint": "http://localhost:4318",
+        "metric_export_interval_ms": 5000,
+        "trace_sample_ratio": 1.0
+    },
     "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384
@@ -119,6 +132,24 @@ The formatter accepts both plain JSON and JSON wrapped in a Markdown code fence.
 Ollama's own default is 4096 regardless of what the model supports (`ministral-3:8b` supports 262144), which is why an explicit value is required. Raising it costs RAM, since the cache is allocated when the model loads — 16384 comfortably fits roughly twenty turns.
 
 Zero and negative values are not sentinels for "use the model maximum". Ollama clamps them to a roughly 4-token window and still returns HTTP 200, producing unrelated output from a prompt that was silently discarded, so they are rejected at startup instead.
+
+## Telemetry
+
+The `telemetry` object is optional. When it is omitted or `telemetry.enabled` is `false`, the application does not initialize OpenTelemetry exporters and can run without the local observability stack.
+
+When enabled, `otlp_http_endpoint` is treated as the OTLP/HTTP base URL. The application automatically sends traces to `/v1/traces` and metrics to `/v1/metrics`.
+
+`trace_sample_ratio` controls trace sampling:
+
+- `1.0`: record every trace
+- `0.5`: record approximately half of traces
+- `0.0`: record no traces
+
+Trace sampling does not disable metrics.
+
+`metric_export_interval_ms` controls how frequently metrics are sent. Smaller values update Prometheus more frequently but increase export activity.
+
+For setup, querying, retention, and safe shutdown instructions, see the [Observability Guide](observability.md).
 
 ## Security
 

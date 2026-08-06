@@ -5,6 +5,7 @@ from typing import Any
 
 from config_loader import Config
 from session_logger import measure_duration
+from telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 
@@ -107,6 +108,21 @@ def send_request(
         with urllib.request.urlopen(req, timeout=config.request_timeout) as response:
             response_data = json.loads(response.read().decode("utf-8"))
 
+    finish_reason = response_data.get("done_reason")
+    input_tokens = response_data.get("prompt_eval_count")
+    output_tokens = response_data.get("eval_count")
+
+    record_gen_ai_response(
+        provider=config.provider,
+        request_model=config.model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        response_model=response_data.get("model"),
+        finish_reason=finish_reason,
+        truncated=finish_reason == "length",
+        truncation_reason="length",
+    )
+
     logger.info(
         "Response received: model=%s duration_ms=%d input_tokens=%s output_tokens=%s",
         config.model,
@@ -116,7 +132,7 @@ def send_request(
     )
     logger.debug("Response: %s", response_data)
 
-    if response_data.get("done_reason") == "length":
+    if finish_reason == "length":
         raise ValueError(
             f"Response truncated before completion: "
             f"prompt={response_data.get('prompt_eval_count')} tokens, "

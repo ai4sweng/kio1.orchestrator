@@ -1,0 +1,64 @@
+services:
+  tempo:
+    image: grafana/tempo:3.0.2
+    restart: unless-stopped
+    command:
+      - -target=all
+      - -config.file=/etc/tempo/tempo.yaml
+    volumes:
+      - ./tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    ports:
+      - "127.0.0.1:3200:3200"
+    stop_grace_period: 30s
+
+  prometheus:
+    image: prom/prometheus:v3.13.2
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yaml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d
+      - --web.enable-otlp-receiver
+    volumes:
+      - ./prometheus.yaml:/etc/prometheus/prometheus.yaml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"
+    stop_grace_period: 30s
+
+  collector-storage-init:
+    image: busybox:1.37.0
+    user: "0:0"
+    command:
+      - chown
+      - "10001:10001"
+      - /var/lib/otelcol
+    volumes:
+      - collector-data:/var/lib/otelcol
+    restart: "no"
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.158.0
+    restart: unless-stopped
+    command:
+      - --config=/etc/otelcol-contrib/config.yaml
+    depends_on:
+      collector-storage-init:
+        condition: service_completed_successfully
+      tempo:
+        condition: service_started
+      prometheus:
+        condition: service_started
+    volumes:
+      - ./otel-collector.yaml:/etc/otelcol-contrib/config.yaml:ro
+      - collector-data:/var/lib/otelcol
+    ports:
+      - "127.0.0.1:4318:4318"
+      - "127.0.0.1:13133:13133"
+    stop_grace_period: 30s
+
+volumes:
+  collector-data:
+  prometheus-data:
+  tempo-data:

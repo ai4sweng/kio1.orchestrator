@@ -25,6 +25,20 @@ Ollama requires:
 }
 ```
 
+## Ollama connection refused
+
+Ollama is separate from the observability stack. Start it with:
+
+```bash
+ollama serve
+```
+
+Then confirm availability:
+
+```bash
+ollama list
+```
+
 ## OpenAI authentication error
 
 Confirm the key is set:
@@ -95,3 +109,183 @@ A log containing `Startup failed` with no `Session ended` line never reached the
 `input_tokens` grows every turn because the whole transcript is re-sent, while `output_tokens` stays roughly flat — the two diverging shows the cost of replaying conversation history.
 
 Compare `Model preloaded:` against `Response received:` durations to separate startup cost from request cost. With `keep_alive: -1` the model load is paid once at startup rather than per request.
+
+## Observability
+
+### Telemetry export timeouts
+
+Messages such as:
+
+```text
+Failed to export span batch
+Failed to export metrics batch
+```
+
+mean the application cannot reach the configured OpenTelemetry Collector.
+
+Confirm that the observability stack is running:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml ps -a
+```
+
+Check Collector readiness:
+
+```bash
+curl -f http://127.0.0.1:13133/
+```
+
+The default application endpoint is:
+
+```text
+http://localhost:4318
+```
+
+Start the observability stack before starting KIO1 when telemetry is enabled:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml up -d
+```
+
+Telemetry-export failures do not prevent provider requests from completing. However, telemetry that cannot reach the Collector may eventually be discarded after the application exporter exhausts its retries or shuts down.
+
+### Collector missing from `docker compose ps`
+
+The normal `docker compose ps` output only shows running containers. Include stopped containers with:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml ps -a
+```
+
+Inspect the Collector logs:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml logs otel-collector
+```
+
+The storage initializer should show:
+
+```text
+Exited (0)
+```
+
+This is expected. The OpenTelemetry Collector itself should show `Up`.
+
+### Collector storage permission denied
+
+An error similar to:
+
+```text
+mkdir /var/lib/otelcol/storage: permission denied
+```
+
+means the Collector persistent volume does not have the required ownership.
+
+The `collector-storage-init` service normally fixes the ownership automatically. Run it again explicitly:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml run --rm --no-deps \
+  collector-storage-init
+```
+
+Then start the stack and inspect all container states:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml up -d
+docker compose -f observability/compose.telemetry.yaml ps -a
+```
+
+Do not solve this by deleting the named volume because doing so would remove queued telemetry.
+
+### Empty Prometheus query result
+
+A plain query such as:
+
+```promql
+kio1_turns_total
+```
+
+can return no data when the application has stopped or telemetry has been disabled. Prometheus instant queries only return recently active series.
+
+Use a historical query:
+
+```promql
+last_over_time(kio1_turns_total[24h])
+```
+
+Confirm that KIO1 metric names exist:
+
+```bash
+curl -sS -G http://127.0.0.1:9090/api/v1/label/__name__/values \
+  --data-urlencode 'match[]={__name__=~"kio1_.*|gen_ai_.*"}' \
+  | python3 -m json.tool
+```
+
+If this returns metric names, the data is stored and the original query was outside the active-series time window.
+
+### No traces returned by Tempo
+
+Confirm that telemetry was enabled before running KIO1:
+
+```json
+"enabled": true
+```
+
+Check Collector and Tempo readiness:
+
+```bash
+curl -f http://127.0.0.1:13133/
+curl -f http://127.0.0.1:3200/ready
+```
+
+Run at least one KIO1 request and type `exit` so pending telemetry is flushed.
+
+Search again:
+
+```bash
+curl -sS -G http://127.0.0.1:3200/api/search \
+  --data-urlencode 'q={ resource.service.name = "kio1-orchestrator" }' \
+  | python3 -m json.tool
+```
+
+Ensure the searched service name matches `telemetry.service_name` in `config.json`.
+
+### Observability service fails during startup
+
+Inspect the affected service:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml ps -a
+```
+
+Then read its logs:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml logs SERVICE_NAME
+```
+
+Replace `SERVICE_NAME` with one of:
+
+```text
+otel-collector
+tempo
+prometheus
+```
+
+Validate all configuration files using the commands in the [Observability Guide](observability.md#validating-the-configuration).
+
+### Stored telemetry was removed
+
+The following command deletes the named observability volumes:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml down -v
+```
+
+Data deleted this way cannot be recovered unless the volumes were backed up separately.
+
+The safe shutdown command is:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml stop
+```
