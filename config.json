@@ -8,6 +8,13 @@
     "request_timeout": 120,
     "keep_alive": -1,
     "max_output_tokens": 4096,
+    "telemetry": {
+        "enabled": false,
+        "service_name": "kio1-orchestrator",
+        "otlp_http_endpoint": "http://localhost:4318",
+        "metric_export_interval_ms": 5000,
+        "trace_sample_ratio": 1.0
+    },
     "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384

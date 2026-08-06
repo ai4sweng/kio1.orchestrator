@@ -12,6 +12,16 @@ from config_loader import load_config
 from prompt_loader import load_prompt
 from provider_client import load_provider
 from session_logger import generate_session_id, init_logger
+from telemetry import (
+    init_telemetry,
+    record_session_completed,
+    record_session_started,
+    shutdown_telemetry,
+    trace_gen_ai_request,
+    trace_operation,
+    trace_provider_preload,
+    trace_turn,
+)
 
 logger = logging.getLogger("main")
 
@@ -24,27 +34,50 @@ def main() -> None:
         logger.info("Session started: session_id=%s", session_id)
 
         config = load_config()
-        system_prompt = load_prompt(config.prompt_path)
+        init_telemetry(config.telemetry)
 
-        provider = load_provider(config.provider, config.allowed_providers)
-        client = provider.create_client(config)
+        startup_attributes = {
+            "gen_ai.provider.name": config.provider,
+            "gen_ai.request.model": config.model,
+            "gen_ai.conversation.id": session_id,
+        }
 
-        print(f"Loading {config.provider} model {config.model}...")
-        provider.preload(config, client)
+        with trace_operation("kio1.startup", startup_attributes):
+            system_prompt = load_prompt(config.prompt_path)
 
-        chat_file = create_chat_file(config.chat_directory, system_prompt, session_id)
+            provider = load_provider(config.provider, config.allowed_providers)
+            client = provider.create_client(config)
+
+            print(f"Loading {config.provider} model {config.model}...")
+            with trace_provider_preload(
+                provider=config.provider,
+                model=config.model,
+            ):
+                provider.preload(config, client)
+
+            chat_file = create_chat_file(
+                config.chat_directory, system_prompt, session_id
+            )
+            record_session_started(
+                provider=config.provider,
+                model=config.model,
+            )
+
     except Exception:
         logger.exception("Startup failed")
         print(
             "Error: failed to start orchestrator. Check logs for details.",
             file=sys.stderr,
         )
+        shutdown_telemetry()
         sys.exit(1)
 
     print("KIO1 Orchestrator (type 'exit' to quit)")
     print("-" * 40)
 
     turn = 0
+    session_success = False
+
     try:
         while True:
             try:
@@ -63,31 +96,54 @@ def main() -> None:
             turn += 1
             logger.info("Turn started: turn=%d", turn)
 
-            messages = load_messages(chat_file)
-            messages.append({"role": "user", "content": query})
-
             try:
                 content = ""
-                response = provider.send_request(
-                    config=config,
-                    client=client,
-                    system_prompt=system_prompt,
-                    messages=messages,
-                )
-                content = provider.extract_content(response)
-                formatted = format_json(content)
 
-                append_user_message(chat_file, query)
-                append_assistant_message(chat_file, content)
-                print(f"\n{formatted}")
+                with trace_turn(
+                    session_id=session_id,
+                    turn_number=turn,
+                    provider=config.provider,
+                    model=config.model,
+                ):
+                    messages = load_messages(chat_file)
+                    messages.append({"role": "user", "content": query})
+
+                    with trace_gen_ai_request(
+                        provider=config.provider,
+                        model=config.model,
+                        session_id=session_id,
+                        turn_number=turn,
+                        message_count=len(messages) + 1,
+                        max_output_tokens=config.max_output_tokens,
+                        temperature=config.temperature,
+                    ):
+                        response = provider.send_request(
+                            config=config,
+                            client=client,
+                            system_prompt=system_prompt,
+                            messages=messages,
+                        )
+                    content = provider.extract_content(response)
+                    formatted = format_json(content)
+
+                    append_user_message(chat_file, query)
+                    append_assistant_message(chat_file, content)
+                    print(f"\n{formatted}")
 
             except Exception as e:
                 logger.exception("Request failed: turn=%d", turn)
                 print(f"\nError: {e}", file=sys.stderr)
                 if content:
                     print(f"Raw response: {content!r}", file=sys.stderr)
+        session_success = True
     finally:
+        record_session_completed(
+            provider=config.provider,
+            model=config.model,
+            success=session_success,
+        )
         logger.info("Session ended: turns=%d", turn)
+        shutdown_telemetry()
 
 
 if __name__ == "__main__":

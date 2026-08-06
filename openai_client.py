@@ -7,6 +7,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from config_loader import Config
 from session_logger import measure_duration
+from telemetry import record_gen_ai_response
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +86,20 @@ def send_request(
         response = client.chat.completions.create(**request_kwargs)
 
     usage = getattr(response, "usage", None)
+    finish_reason = response.choices[0].finish_reason
+
+    record_gen_ai_response(
+        provider=config.provider,
+        request_model=config.model,
+        input_tokens=getattr(usage, "prompt_tokens", None),
+        output_tokens=getattr(usage, "completion_tokens", None),
+        response_model=getattr(response, "model", None),
+        response_id=getattr(response, "id", None),
+        finish_reason=finish_reason,
+        truncated=finish_reason == "length",
+        truncation_reason="max_output_tokens",
+    )
+
     logger.info(
         "Response received: model=%s duration_ms=%d input_tokens=%s output_tokens=%s",
         config.model,
@@ -93,7 +108,7 @@ def send_request(
         getattr(usage, "completion_tokens", None),
     )
 
-    if response.choices[0].finish_reason == "length":
+    if finish_reason == "length":
         raise ValueError(
             "OpenAI response reached max_output_tokens "
             f"({config.max_output_tokens}) before completion."
