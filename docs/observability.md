@@ -95,9 +95,26 @@ Every span and metric also carries the resource attributes `kio.id` and `deploym
 | `kio1.workflow.plans` | Workflow plans successfully parsed |
 | `kio1.workflow.step.count` | Steps in parsed workflow plans |
 
-> **Note:** these are the metrics instrumented so far. They are not yet the AI4SWENG platform's contractually required metric set (`kio_request_count`, `kio_request_duration_ms`, `kio_request_error_count`, `kio_llm_token_count`, `kio_llm_cost_usd`, `kio_session_active_count`, `kio_heartbeat`) or the platform's dot-style naming/resource-attribute convention beyond `kio.id`/`deployment.environment`. Aligning to that contract is tracked as follow-up work.
+In addition to the metrics above, KIO1 also emits the AI4SWENG Observability Integration Contract v1.0's mandatory metric set (contract section 2.1), so that KIO1 shows up correctly in the platform's shared dashboards (KIO dropdown, stale-KIO alert, etc.) alongside `kio2-sim`, `kio3`, `kio4`, and `kio7`:
 
-The platform's Collector converts dots to underscores on ingest (`add_metric_suffixes: false`, so `kio1.turns` becomes `kio1_turns` rather than `kio1_turns_total`). Histograms still produce `_bucket`, `_count`, and `_sum` series, since that is structurally required. Exact naming depends on the Collector's exporter configuration, which is owned by the observability platform, not this repository.
+| OpenTelemetry metric | Contract metric name | Description |
+|-----------------------|-----------------------|-------------|
+| `kio.request.count` | `kio_request_count` | Total requests processed, tagged `status` (one request = one user turn) |
+| `kio.request.duration_ms` | `kio_request_duration_ms` | End-to-end request latency, in milliseconds |
+| `kio.request.error_count` | `kio_request_error_count` | Errors, tagged `error_type` |
+| `kio.llm.token_count` | `kio_llm_token_count` | Token usage, tagged `direction` (`input`/`output`) |
+| `kio.llm.cost_usd` | `kio_llm_cost_usd` | Estimated cumulative LLM cost |
+| `kio.session.active_count` | `kio_session_active_count` | Currently active sessions |
+| `kio.heartbeat` | `kio_heartbeat` | Liveness signal, incremented every 60 seconds while telemetry is enabled |
+
+Two of these are estimates, not measurements, and should be read accordingly on any dashboard:
+
+- `kio_llm_cost_usd` is derived from a fixed per-provider USD/1K-token coefficient (`_COST_PER_1K_TOKENS_USD` in `telemetry.py`; currently `ollama=0.0`, `openai=0.002`, `anthropic=0.003`), not each provider's real invoice. It should be revisited before being used for real budget decisions.
+- `kio_session_active_count` is best-effort: if the process is killed instead of exiting normally (`exit` in the KIO1 prompt or `Ctrl+C`), the corresponding decrement never runs and the count will not settle until telemetry re-initializes.
+
+`kio.id` and `deployment.environment` are resource attributes (see [Enabling Telemetry](#enabling-telemetry)), not per-metric tags — the platform's Collector auto-promotes resource attributes to labels on ingest (`resource_to_telemetry_conversion`), so they do not need to be attached to each metric call individually.
+
+The platform's Collector converts dots to underscores on ingest (`add_metric_suffixes: false`, so `kio1.turns` becomes `kio1_turns` rather than `kio1_turns_total`, and `kio.request.count` becomes `kio_request_count`). Histograms still produce `_bucket`, `_count`, and `_sum` series, since that is structurally required. Exact naming depends on the Collector's exporter configuration, which is owned by the observability platform, not this repository.
 
 ## Privacy
 

@@ -62,6 +62,9 @@ def test_interrupted_turn_is_recorded_as_error() -> None:
     instruments = SimpleNamespace(
         turns=MagicMock(),
         turn_duration=MagicMock(),
+        request_count=MagicMock(),
+        request_duration_ms=MagicMock(),
+        request_error_count=MagicMock(),
     )
 
     with (
@@ -369,6 +372,9 @@ def test_turn_metrics_exclude_session_identifiers() -> None:
     instruments = SimpleNamespace(
         turns=MagicMock(),
         turn_duration=MagicMock(),
+        request_count=MagicMock(),
+        request_duration_ms=MagicMock(),
+        request_error_count=MagicMock(),
     )
 
     with (
@@ -418,6 +424,8 @@ def test_record_gen_ai_response_records_tokens_and_truncation() -> None:
     instruments = SimpleNamespace(
         gen_ai_token_usage=MagicMock(),
         response_truncations=MagicMock(),
+        llm_token_count=MagicMock(),
+        llm_cost_usd=MagicMock(),
     )
 
     with (
@@ -574,3 +582,201 @@ def test_shutdown_continues_when_metric_shutdown_fails(
 
     meter_provider.shutdown.assert_called_once_with()
     tracer_provider.shutdown.assert_called_once_with()
+
+
+def test_heartbeat_loop_ticks_until_stopped() -> None:
+    """Verify the heartbeat loop increments the counter once per interval."""
+
+    instruments = SimpleNamespace(heartbeat=MagicMock())
+    stop_event = MagicMock()
+    stop_event.wait.side_effect = [False, False, True]
+
+    telemetry._heartbeat_loop(instruments, stop_event)
+
+    assert instruments.heartbeat.add.call_count == 2
+    instruments.heartbeat.add.assert_called_with(1)
+    stop_event.wait.assert_called_with(telemetry._HEARTBEAT_INTERVAL_SECONDS)
+
+
+def test_start_heartbeat_replaces_existing_thread(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify restarting the heartbeat stops the previous thread first."""
+
+    instruments = SimpleNamespace(heartbeat=MagicMock())
+    monkeypatch.setattr(telemetry, "_heartbeat_thread", None)
+    monkeypatch.setattr(telemetry, "_heartbeat_stop_event", None)
+    monkeypatch.setattr(telemetry, "_HEARTBEAT_INTERVAL_SECONDS", 3600.0)
+
+    try:
+        telemetry._start_heartbeat(instruments)
+        first_thread = telemetry._heartbeat_thread
+        assert first_thread is not None
+        assert first_thread.is_alive()
+
+        telemetry._start_heartbeat(instruments)
+        second_thread = telemetry._heartbeat_thread
+        assert second_thread is not first_thread
+        assert not first_thread.is_alive()
+        assert second_thread.is_alive()
+    finally:
+        telemetry._stop_heartbeat()
+
+    assert telemetry._heartbeat_thread is None
+    assert telemetry._heartbeat_stop_event is None
+
+
+def test_trace_turn_records_contract_request_metrics() -> None:
+    """Verify a successful turn records the contract's request metrics."""
+
+    tracer, _ = _recording_tracer()
+    instruments = SimpleNamespace(
+        turns=MagicMock(),
+        turn_duration=MagicMock(),
+        request_count=MagicMock(),
+        request_duration_ms=MagicMock(),
+        request_error_count=MagicMock(),
+    )
+
+    with (
+        patch.object(telemetry, "_tracer", tracer),
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(
+            telemetry,
+            "perf_counter",
+            side_effect=[10.0, 10.4],
+        ),
+    ):
+        with telemetry.trace_turn(
+            session_id="session-123",
+            turn_number=1,
+            provider="ollama",
+            model="test-model",
+        ):
+            pass
+
+    instruments.request_count.add.assert_called_once_with(1, {"status": "success"})
+    instruments.request_duration_ms.record.assert_called_once_with(
+        pytest.approx(400.0)
+    )
+    instruments.request_error_count.add.assert_not_called()
+
+
+def test_trace_turn_records_contract_error_metrics() -> None:
+    """Verify a failed turn records the contract's error metric."""
+
+    tracer, _ = _recording_tracer()
+    instruments = SimpleNamespace(
+        turns=MagicMock(),
+        turn_duration=MagicMock(),
+        request_count=MagicMock(),
+        request_duration_ms=MagicMock(),
+        request_error_count=MagicMock(),
+    )
+
+    with (
+        patch.object(telemetry, "_tracer", tracer),
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(
+            telemetry,
+            "perf_counter",
+            side_effect=[10.0, 10.1],
+        ),
+        pytest.raises(RuntimeError),
+    ):
+        with telemetry.trace_turn(
+            session_id="session-123",
+            turn_number=1,
+            provider="ollama",
+            model="test-model",
+        ):
+            raise RuntimeError("boom")
+
+    instruments.request_count.add.assert_called_once_with(1, {"status": "error"})
+    instruments.request_error_count.add.assert_called_once_with(
+        1, {"error_type": "RuntimeError"}
+    )
+
+
+def test_record_gen_ai_response_records_contract_token_and_cost_metrics() -> None:
+    """Verify token direction counts and an estimated cost are recorded."""
+
+    span = MagicMock()
+    span.is_recording.return_value = False
+
+    instruments = SimpleNamespace(
+        gen_ai_token_usage=MagicMock(),
+        response_truncations=MagicMock(),
+        llm_token_count=MagicMock(),
+        llm_cost_usd=MagicMock(),
+    )
+
+    with (
+        patch.object(
+            telemetry.trace,
+            "get_current_span",
+            return_value=span,
+        ),
+        patch.object(telemetry, "_instruments", instruments),
+    ):
+        telemetry.record_gen_ai_response(
+            provider="openai",
+            request_model="requested-model",
+            input_tokens=750,
+            output_tokens=250,
+        )
+
+    instruments.llm_token_count.add.assert_any_call(750, {"direction": "input"})
+    instruments.llm_token_count.add.assert_any_call(250, {"direction": "output"})
+    instruments.llm_cost_usd.add.assert_called_once_with(pytest.approx(0.002))
+
+
+def test_record_gen_ai_response_skips_cost_for_free_provider() -> None:
+    """Verify no cost is recorded for a provider with a zero coefficient."""
+
+    span = MagicMock()
+    span.is_recording.return_value = False
+
+    instruments = SimpleNamespace(
+        gen_ai_token_usage=MagicMock(),
+        response_truncations=MagicMock(),
+        llm_token_count=MagicMock(),
+        llm_cost_usd=MagicMock(),
+    )
+
+    with (
+        patch.object(
+            telemetry.trace,
+            "get_current_span",
+            return_value=span,
+        ),
+        patch.object(telemetry, "_instruments", instruments),
+    ):
+        telemetry.record_gen_ai_response(
+            provider="ollama",
+            request_model="requested-model",
+            input_tokens=100,
+            output_tokens=50,
+        )
+
+    instruments.llm_cost_usd.add.assert_not_called()
+
+
+def test_session_started_and_completed_track_active_count() -> None:
+    """Verify session start/completion increments and decrements active count."""
+
+    instruments = SimpleNamespace(
+        sessions_started=MagicMock(),
+        sessions_completed=MagicMock(),
+        session_active_count=MagicMock(),
+    )
+
+    with patch.object(telemetry, "_instruments", instruments):
+        telemetry.record_session_started(provider="ollama", model="test-model")
+        telemetry.record_session_completed(
+            provider="ollama",
+            model="test-model",
+            success=True,
+        )
+
+    instruments.session_active_count.add.assert_has_calls([call(1), call(-1)])

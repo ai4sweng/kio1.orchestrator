@@ -1,4 +1,5 @@
 import logging
+import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -9,7 +10,7 @@ from opentelemetry.exporter.otlp.proto.http.metric_exporter import (
     OTLPMetricExporter,
 )
 from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-from opentelemetry.metrics import Counter, Histogram, Meter
+from opentelemetry.metrics import Counter, Histogram, Meter, UpDownCounter
 from opentelemetry.sdk.metrics import MeterProvider
 from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
 from opentelemetry.sdk.resources import Resource
@@ -68,6 +69,24 @@ _ALLOWED_TRUNCATION_REASONS = {
     "length",
 }
 
+# AI4SWENG Observability Integration Contract v1.0, section 2.1: mandatory
+# metric set, expressed in milliseconds to match kio_request_duration_ms.
+_REQUEST_DURATION_MS_BUCKETS = tuple(
+    bucket * 1000 for bucket in _GEN_AI_DURATION_BUCKETS
+)
+
+_HEARTBEAT_INTERVAL_SECONDS = 60.0
+
+# Rough, non-billing-accurate USD-per-1K-token estimate used only because the
+# contract's kio_llm_cost_usd metric is mandatory and none of the providers
+# KIO1 talks to expose real invoice data locally. Mirrors the simulated
+# per-model coefficients used by the platform's kio3/kio4 KIO simulators.
+_COST_PER_1K_TOKENS_USD: dict[str, float] = {
+    "ollama": 0.0,
+    "openai": 0.002,
+    "anthropic": 0.003,
+}
+
 
 @dataclass(frozen=True)
 class _Instruments:
@@ -87,12 +106,24 @@ class _Instruments:
     workflow_plans: Counter
     workflow_step_count: Histogram
 
+    # AI4SWENG Observability Integration Contract v1.0, section 2.1:
+    # mandatory metric set, one instrument per contract metric name.
+    request_count: Counter
+    request_duration_ms: Histogram
+    request_error_count: Counter
+    llm_token_count: Counter
+    llm_cost_usd: Counter
+    session_active_count: UpDownCounter
+    heartbeat: Counter
+
 
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
 _tracer: Tracer = trace.get_tracer(_INSTRUMENTATION_SCOPE)
 _meter: Meter = metrics.get_meter(_INSTRUMENTATION_SCOPE)
 _instruments: _Instruments | None = None
+_heartbeat_thread: threading.Thread | None = None
+_heartbeat_stop_event: threading.Event | None = None
 
 
 def _create_instruments(meter: Meter) -> _Instruments:
@@ -168,6 +199,65 @@ def _create_instruments(meter: Meter) -> _Instruments:
             unit="{step}",
             description="Number of steps in generated workflow plans.",
         ),
+        request_count=meter.create_counter(
+            "kio.request.count",
+            unit="1",
+            description=(
+                "Total number of requests processed (contract metric "
+                "kio_request_count)."
+            ),
+        ),
+        request_duration_ms=meter.create_histogram(
+            "kio.request.duration_ms",
+            unit="ms",
+            description=(
+                "End-to-end request latency distribution (contract metric "
+                "kio_request_duration_ms)."
+            ),
+            explicit_bucket_boundaries_advisory=_REQUEST_DURATION_MS_BUCKETS,
+        ),
+        request_error_count=meter.create_counter(
+            "kio.request.error_count",
+            unit="1",
+            description=(
+                "Errors categorized by a bounded error type (contract "
+                "metric kio_request_error_count)."
+            ),
+        ),
+        llm_token_count=meter.create_counter(
+            "kio.llm.token_count",
+            unit="{token}",
+            description=(
+                "LLM token usage by direction (contract metric "
+                "kio_llm_token_count)."
+            ),
+        ),
+        llm_cost_usd=meter.create_counter(
+            "kio.llm.cost_usd",
+            unit="USD",
+            description=(
+                "Estimated cumulative LLM cost (contract metric "
+                "kio_llm_cost_usd). Derived from a fixed per-provider "
+                "USD/1K-token coefficient, not real billing data."
+            ),
+        ),
+        session_active_count=meter.create_up_down_counter(
+            "kio.session.active_count",
+            unit="1",
+            description=(
+                "Number of currently active sessions (contract metric "
+                "kio_session_active_count)."
+            ),
+        ),
+        heartbeat=meter.create_counter(
+            "kio.heartbeat",
+            unit="1",
+            description=(
+                "Background liveness signal incremented every "
+                f"{int(_HEARTBEAT_INTERVAL_SECONDS)} seconds while "
+                "telemetry is enabled (contract metric kio_heartbeat)."
+            ),
+        ),
     )
 
 
@@ -239,6 +329,8 @@ def init_telemetry(config: TelemetryConfig) -> None:
     _meter = meter_provider.get_meter(_INSTRUMENTATION_SCOPE)
     _instruments = _create_instruments(_meter)
 
+    _start_heartbeat(_instruments)
+
     logger.info(
         "OpenTelemetry initialized: service=%s endpoint=%s",
         config.service_name,
@@ -246,8 +338,63 @@ def init_telemetry(config: TelemetryConfig) -> None:
     )
 
 
+def _heartbeat_loop(instruments: _Instruments, stop_event: threading.Event) -> None:
+    """Increment the heartbeat counter every interval until stopped.
+
+    Args:
+        instruments: The metric instruments to record onto.
+        stop_event: Signaled to stop the loop and exit the thread promptly.
+
+    Returns:
+        None.
+    """
+    while not stop_event.wait(_HEARTBEAT_INTERVAL_SECONDS):
+        try:
+            instruments.heartbeat.add(1)
+        except Exception:
+            logger.exception("Failed to record the kio.heartbeat metric")
+
+
+def _start_heartbeat(instruments: _Instruments) -> None:
+    """Start the background heartbeat thread, replacing any existing one."""
+
+    global _heartbeat_thread
+    global _heartbeat_stop_event
+
+    _stop_heartbeat()
+
+    stop_event = threading.Event()
+    thread = threading.Thread(
+        target=_heartbeat_loop,
+        args=(instruments, stop_event),
+        name="kio1-otel-heartbeat",
+        daemon=True,
+    )
+    _heartbeat_stop_event = stop_event
+    _heartbeat_thread = thread
+    thread.start()
+
+
+def _stop_heartbeat() -> None:
+    """Signal the heartbeat thread to stop and wait briefly for it to exit."""
+
+    global _heartbeat_thread
+    global _heartbeat_stop_event
+
+    if _heartbeat_stop_event is not None:
+        _heartbeat_stop_event.set()
+
+    if _heartbeat_thread is not None:
+        _heartbeat_thread.join(timeout=1.0)
+
+    _heartbeat_thread = None
+    _heartbeat_stop_event = None
+
+
 def shutdown_telemetry() -> None:
     """Flush pending telemetry and shut down exporters safely."""
+
+    _stop_heartbeat()
 
     meter_provider = _meter_provider
     tracer_provider = _tracer_provider
@@ -340,11 +487,24 @@ def trace_turn(
                 if error_type is not None:
                     metric_attributes["error.type"] = error_type
 
+                elapsed_seconds = perf_counter() - started_at
                 instruments.turns.add(1, metric_attributes)
                 instruments.turn_duration.record(
-                    perf_counter() - started_at,
+                    elapsed_seconds,
                     metric_attributes,
                 )
+
+                # Contract mandatory metrics (kio_request_count,
+                # kio_request_duration_ms, kio_request_error_count): one
+                # "request" is one complete user turn, mirroring the
+                # platform's kio-simulator request definition.
+                instruments.request_count.add(1, {"status": status})
+                instruments.request_duration_ms.record(elapsed_seconds * 1000)
+
+                if error_type is not None:
+                    instruments.request_error_count.add(
+                        1, {"error_type": error_type}
+                    )
 
 
 @contextmanager
@@ -497,6 +657,8 @@ def record_gen_ai_response(
             input_tokens,
             input_attributes,
         )
+        # Contract mandatory metric kio_llm_token_count (tag: direction).
+        instruments.llm_token_count.add(input_tokens, {"direction": "input"})
 
     if type(output_tokens) is int and output_tokens >= 0:
         output_attributes = dict(metric_attributes)
@@ -505,6 +667,23 @@ def record_gen_ai_response(
             output_tokens,
             output_attributes,
         )
+        instruments.llm_token_count.add(output_tokens, {"direction": "output"})
+
+    total_tokens = 0
+    if type(input_tokens) is int and input_tokens >= 0:
+        total_tokens += input_tokens
+    if type(output_tokens) is int and output_tokens >= 0:
+        total_tokens += output_tokens
+
+    if total_tokens > 0:
+        # Contract mandatory metric kio_llm_cost_usd. This is an estimate
+        # from a fixed per-provider coefficient (_COST_PER_1K_TOKENS_USD),
+        # not real provider billing data.
+        cost_usd = (
+            total_tokens / 1000
+        ) * _COST_PER_1K_TOKENS_USD.get(provider, 0.0)
+        if cost_usd > 0:
+            instruments.llm_cost_usd.add(cost_usd)
 
     if truncated:
         normalized_reason = (
@@ -529,6 +708,10 @@ def record_session_started(*, provider: str, model: str) -> None:
             1,
             _model_attributes(provider, model),
         )
+        # Contract mandatory metric kio_session_active_count. Best-effort:
+        # if the process is killed before record_session_completed() runs,
+        # this count will not be decremented until telemetry re-initializes.
+        instruments.session_active_count.add(1)
 
 
 def record_session_completed(
@@ -544,6 +727,7 @@ def record_session_completed(
         metric_attributes = _model_attributes(provider, model)
         metric_attributes["kio1.status"] = "success" if success else "error"
         instruments.sessions_completed.add(1, metric_attributes)
+        instruments.session_active_count.add(-1)
 
 
 def record_format_fallback() -> None:
