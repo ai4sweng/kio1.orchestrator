@@ -17,6 +17,8 @@ class TelemetryConfig:
     otlp_http_endpoint: str = "http://localhost:4318"
     metric_export_interval_ms: int = 5000
     trace_sample_ratio: float = 1.0
+    kio_id: str = "kio1"
+    deployment_environment: str = "local"
 
 
 @dataclass
@@ -89,12 +91,29 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
             "telemetry.trace_sample_ratio must be a number between 0.0 and 1.0."
         )
 
+    kio_id = telemetry_data.get("kio_id", "kio1")
+    if not isinstance(kio_id, str) or not kio_id.strip():
+        raise ValueError("telemetry.kio_id must be a non-empty string.")
+
+    deployment_environment = telemetry_data.get(
+        "deployment_environment", "local"
+    )
+    if (
+        not isinstance(deployment_environment, str)
+        or not deployment_environment.strip()
+    ):
+        raise ValueError(
+            "telemetry.deployment_environment must be a non-empty string."
+        )
+
     return TelemetryConfig(
         enabled=enabled,
         service_name=service_name.strip(),
         otlp_http_endpoint=endpoint,
         metric_export_interval_ms=export_interval,
         trace_sample_ratio=float(sample_ratio),
+        kio_id=kio_id.strip(),
+        deployment_environment=deployment_environment.strip(),
     )
 
 

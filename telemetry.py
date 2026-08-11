@@ -197,6 +197,8 @@ def init_telemetry(config: TelemetryConfig) -> None:
     resource = Resource.create(
         {
             "service.name": config.service_name,
+            "kio.id": config.kio_id,
+            "deployment.environment": config.deployment_environment,
         }
     )
 

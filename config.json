@@ -11,9 +11,11 @@
     "telemetry": {
         "enabled": false,
         "service_name": "kio1-orchestrator",
-        "otlp_http_endpoint": "http://localhost:4318",
+        "otlp_http_endpoint": "http://157.230.17.89:4318",
         "metric_export_interval_ms": 5000,
-        "trace_sample_ratio": 1.0
+        "trace_sample_ratio": 1.0,
+        "kio_id": "kio1",
+        "deployment_environment": "local"
     },
     "provider_options": {
         "endpoint": "http://localhost:11434",

@@ -112,6 +112,8 @@ Compare `Model preloaded:` against `Response received:` durations to separate st
 
 ## Observability
 
+> KIO1 now sends telemetry to the shared, remote AI4SWENG observability platform instead of a local Docker Compose stack (see [observability.md](observability.md)). The subsections below that reference `docker compose -f observability/compose.telemetry.yaml` describe the previous local setup and are pending a follow-up revision.
+
 ### Telemetry export timeouts
 
 Messages such as:
