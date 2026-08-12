@@ -112,9 +112,35 @@ Two of these are estimates, not measurements, and should be read accordingly on 
 - `kio_llm_cost_usd` is derived from a fixed per-provider USD/1K-token coefficient (`_COST_PER_1K_TOKENS_USD` in `telemetry.py`; currently `ollama=0.0`, `openai=0.002`, `anthropic=0.003`), not each provider's real invoice. It should be revisited before being used for real budget decisions.
 - `kio_session_active_count` is best-effort: if the process is killed instead of exiting normally (`exit` in the KIO1 prompt or `Ctrl+C`), the corresponding decrement never runs and the count will not settle until telemetry re-initializes.
 
-`kio.id` and `deployment.environment` are resource attributes (see [Enabling Telemetry](#enabling-telemetry)), not per-metric tags — the platform's Collector auto-promotes resource attributes to labels on ingest (`resource_to_telemetry_conversion`), so they do not need to be attached to each metric call individually.
+`kio.id` and `deployment.environment` are set as resource attributes (see [Enabling Telemetry](#enabling-telemetry)); the platform's Collector auto-promotes resource attributes to labels on ingest (`resource_to_telemetry_conversion: enabled: true` in `otel-collector/config.yaml`), so in principle that alone is enough. The seven contract metrics also attach `kio.id` explicitly on every call, matching the platform's own `kio-simulator` reference implementation (`kio2-sim`/`kio3`/`kio4`/`kio7`), which does the same rather than relying only on resource promotion — this removes any doubt about whether promotion applies identically across the Collector's gRPC (`4317`) and HTTP (`4318`) receiver paths.
 
 The platform's Collector converts dots to underscores on ingest (`add_metric_suffixes: false`, so `kio1.turns` becomes `kio1_turns` rather than `kio1_turns_total`, and `kio.request.count` becomes `kio_request_count`). Histograms still produce `_bucket`, `_count`, and `_sum` series, since that is structurally required. Exact naming depends on the Collector's exporter configuration, which is owned by the observability platform, not this repository.
+
+### D1.1 project-management KPIs (simulated)
+
+D2.6 §4.1.1 (`FR-KIO1-08`) frames KIO1 as the integrator across all KIOs and requires "end-to-end observability across KIOs, LM calls, and infrastructure, including energy, hardware, and time utilisation." In that spirit, KIO1 also emits the full D1.1 KPI table (`AI4SWENG_KPI_Metrik_Referansi`), once per turn, using the exact metric names the platform's `kio-simulator` uses for the KIOs each KPI is assigned to — so these land in the same Grafana panels as `kio2-sim`/`kio3`/`kio4`/`kio7`/`kio8`/`kio13`.
+
+**Every one of these is simulated**, not measured — random values inside the D1.1 baseline/target bands, always tagged `source=simulated`. There is no real measurement path for any of them yet (that would require, e.g., a real CI/CD integration for build/review timing, or real adoption tracking — out of scope here).
+
+| OpenTelemetry metric | D1.1 KPI | Description |
+|-----------------------|----------|--------------|
+| `kio.codegen.duration_minutes` | 1.1 Code generation speed | |
+| `kio.issue.resolution_hours` | 1.2 Issue resolution speed | |
+| `kio.lifecycle_energy.pct_of_baseline` | 2.1 Lifecycle energy reduction | |
+| `kio.deploy_energy.tokens_per_s_per_w` | 2.2 Deployment energy efficiency | |
+| `kio.code_quality.score_pct` | 3.1 Code quality improvement | |
+| `kio.review.score` | 3.2 Review score increase | |
+| `kio.dev_productivity.features_per_day` | 4.1 Developer productivity | |
+| `kio.time_to_market.days` | 5.1 Time-to-Market | |
+| `kio.bugfix.duration_hours` | 6.1 Bug-fix time | |
+| `kio.issue.customer_reported_count` | 6.2 Customer-reported issues | Rare event; only recorded on ~5% of errored turns |
+| `kio.cost_saving.pct` | 7.1 Annual cost saving | |
+| `kio.adoption.active_user_pct` | 8.1 Adoption rate | |
+| `kio.adoption.usage_pct` | 8.2 Active usage & satisfaction (usage half) | |
+| `kio.adoption.mos_score` | 8.2 Active usage & satisfaction (MOS half) | |
+| `kio.cross_arch_build.success_count` | 8.3 Cross-Architecture Build Success Rate | Rare event; ~5% chance per turn regardless of outcome |
+| `kio.refactoring.hours_per_feature` | 9.1 Refactoring reduction | |
+| `kio.tech_debt.hours_per_100loc` | 9.2 Technical debt reduction | |
 
 ## Privacy
 

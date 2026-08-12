@@ -1,4 +1,5 @@
 import logging
+import random
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -116,6 +117,30 @@ class _Instruments:
     session_active_count: UpDownCounter
     heartbeat: Counter
 
+    # D1.1 project-management KPIs (AI4SWENG_KPI_Metrik_Referansi), simulated.
+    # KIO1 is D2.6's "AI4SWEng AI Engineering Suite" — the integrator across
+    # all KIOs — so unlike the platform's kio-simulator (which only emits the
+    # KPI subset matching its own KIO_REAL_KPI_ROLE), KIO1 emits the full
+    # table. Names/units match kio-simulator/kio_simulator.py exactly so they
+    # land in the same Grafana panels as kio2-sim/kio3/kio4/kio7/kio8/kio13.
+    kpi_codegen_duration: Histogram  # 1.1
+    kpi_issue_resolution: Histogram  # 1.2
+    kpi_lifecycle_energy: Histogram  # 2.1
+    kpi_deploy_energy_efficiency: Histogram  # 2.2
+    kpi_code_quality: Histogram  # 3.1
+    kpi_review_score: Histogram  # 3.2
+    kpi_dev_productivity: Histogram  # 4.1
+    kpi_time_to_market: Histogram  # 5.1
+    kpi_bugfix_duration: Histogram  # 6.1
+    kpi_customer_reported_issues: Counter  # 6.2
+    kpi_cost_saving: Histogram  # 7.1
+    kpi_adoption_rate: Histogram  # 8.1
+    kpi_adoption_usage: Histogram  # 8.2 (usage half)
+    kpi_adoption_mos: Histogram  # 8.2 (MOS half)
+    kpi_cross_arch_build: Counter  # 8.3
+    kpi_refactoring: Histogram  # 9.1
+    kpi_tech_debt: Histogram  # 9.2
+
 
 _tracer_provider: TracerProvider | None = None
 _meter_provider: MeterProvider | None = None
@@ -124,6 +149,12 @@ _meter: Meter = metrics.get_meter(_INSTRUMENTATION_SCOPE)
 _instruments: _Instruments | None = None
 _heartbeat_thread: threading.Thread | None = None
 _heartbeat_stop_event: threading.Event | None = None
+# Explicit per-metric kio.id, in addition to the kio.id resource attribute.
+# The platform's own kio-simulator reference implementation attaches kio.id
+# on every metric call rather than relying solely on the Collector's
+# resource_to_telemetry_conversion — mirrored here so KIO1's contract
+# metrics are labeled the same way as kio2-sim/kio3/kio4/kio7.
+_kio_id: str = ""
 
 
 def _create_instruments(meter: Meter) -> _Instruments:
@@ -258,19 +289,124 @@ def _create_instruments(meter: Meter) -> _Instruments:
                 "telemetry is enabled (contract metric kio_heartbeat)."
             ),
         ),
+        kpi_codegen_duration=meter.create_histogram(
+            "kio.codegen.duration_minutes",
+            unit="min",
+            description="D1.1 KPI 1.1 Code generation speed (simulated).",
+        ),
+        kpi_issue_resolution=meter.create_histogram(
+            "kio.issue.resolution_hours",
+            unit="h",
+            description="D1.1 KPI 1.2 Issue resolution speed (simulated).",
+        ),
+        kpi_lifecycle_energy=meter.create_histogram(
+            "kio.lifecycle_energy.pct_of_baseline",
+            unit="%",
+            description="D1.1 KPI 2.1 Lifecycle energy reduction (simulated).",
+        ),
+        kpi_deploy_energy_efficiency=meter.create_histogram(
+            "kio.deploy_energy.tokens_per_s_per_w",
+            unit="1",
+            description="D1.1 KPI 2.2 Deployment energy efficiency (simulated).",
+        ),
+        kpi_code_quality=meter.create_histogram(
+            "kio.code_quality.score_pct",
+            unit="%",
+            description="D1.1 KPI 3.1 Code quality improvement (simulated).",
+        ),
+        kpi_review_score=meter.create_histogram(
+            "kio.review.score",
+            unit="1",
+            description="D1.1 KPI 3.2 Review score increase (simulated).",
+        ),
+        kpi_dev_productivity=meter.create_histogram(
+            "kio.dev_productivity.features_per_day",
+            unit="1",
+            description="D1.1 KPI 4.1 Developer productivity (simulated).",
+        ),
+        kpi_time_to_market=meter.create_histogram(
+            "kio.time_to_market.days",
+            unit="d",
+            description="D1.1 KPI 5.1 Time-to-Market (simulated).",
+        ),
+        kpi_bugfix_duration=meter.create_histogram(
+            "kio.bugfix.duration_hours",
+            unit="h",
+            description="D1.1 KPI 6.1 Bug-fix time (simulated).",
+        ),
+        kpi_customer_reported_issues=meter.create_counter(
+            "kio.issue.customer_reported_count",
+            unit="1",
+            description="D1.1 KPI 6.2 Customer-reported issues (simulated).",
+        ),
+        kpi_cost_saving=meter.create_histogram(
+            "kio.cost_saving.pct",
+            unit="%",
+            description="D1.1 KPI 7.1 Annual cost saving (simulated).",
+        ),
+        kpi_adoption_rate=meter.create_histogram(
+            "kio.adoption.active_user_pct",
+            unit="%",
+            description="D1.1 KPI 8.1 Adoption rate (simulated).",
+        ),
+        kpi_adoption_usage=meter.create_histogram(
+            "kio.adoption.usage_pct",
+            unit="%",
+            description="D1.1 KPI 8.2 Active usage, usage half (simulated).",
+        ),
+        kpi_adoption_mos=meter.create_histogram(
+            "kio.adoption.mos_score",
+            unit="1",
+            description="D1.1 KPI 8.2 Active usage, satisfaction/MOS half (simulated).",
+        ),
+        kpi_cross_arch_build=meter.create_counter(
+            "kio.cross_arch_build.success_count",
+            unit="1",
+            description=(
+                "D1.1 KPI 8.3 Cross-Architecture Build Success Rate (simulated)."
+            ),
+        ),
+        kpi_refactoring=meter.create_histogram(
+            "kio.refactoring.hours_per_feature",
+            unit="h",
+            description="D1.1 KPI 9.1 Refactoring reduction (simulated).",
+        ),
+        kpi_tech_debt=meter.create_histogram(
+            "kio.tech_debt.hours_per_100loc",
+            unit="h",
+            description="D1.1 KPI 9.2 Technical debt reduction (simulated).",
+        ),
     )
 
 
-def init_telemetry(config: TelemetryConfig) -> None:
+def init_telemetry(
+    config: TelemetryConfig,
+    *,
+    llm: str,
+    task_type: str = "orchestration",
+) -> None:
     """Initialize OTLP trace and metric exporters.
 
     Args:
         config: Validated telemetry configuration.
+        llm: The configured model name (config.model), attached as the
+            optional bounded-enum `llm` resource attribute — matching the
+            platform's kio-simulator convention, so the KIO Detail
+            dashboard's "LLM" panel resolves for KIO1. KIO1 loads its
+            provider/model once at startup and never changes it mid-process
+            (see config_loader.load_config), so this is safe as a static
+            resource attribute, exactly like the simulators.
+        task_type: The optional bounded-enum `task_type` resource attribute.
+            KIO1 doesn't have a per-request task type the way the KIO
+            simulators do (code-analysis, nlp-requirements, ...); it always
+            does the same job, so this defaults to a fixed literal
+            describing that job.
 
     Returns:
         None.
     """
     global _instruments
+    global _kio_id
     global _meter
     global _meter_provider
     global _tracer
@@ -289,6 +425,10 @@ def init_telemetry(config: TelemetryConfig) -> None:
             "service.name": config.service_name,
             "kio.id": config.kio_id,
             "deployment.environment": config.deployment_environment,
+            # Optional bounded-enum labels (G3-compliant), matching the
+            # platform's kio-simulator convention (Contract §1.2).
+            "llm": llm,
+            "task_type": task_type,
         }
     )
 
@@ -328,8 +468,9 @@ def init_telemetry(config: TelemetryConfig) -> None:
     _tracer = tracer_provider.get_tracer(_INSTRUMENTATION_SCOPE)
     _meter = meter_provider.get_meter(_INSTRUMENTATION_SCOPE)
     _instruments = _create_instruments(_meter)
+    _kio_id = config.kio_id
 
-    _start_heartbeat(_instruments)
+    _start_heartbeat(_instruments, _kio_id)
 
     logger.info(
         "OpenTelemetry initialized: service=%s endpoint=%s",
@@ -338,24 +479,31 @@ def init_telemetry(config: TelemetryConfig) -> None:
     )
 
 
-def _heartbeat_loop(instruments: _Instruments, stop_event: threading.Event) -> None:
+def _heartbeat_loop(
+    instruments: _Instruments,
+    stop_event: threading.Event,
+    kio_id: str,
+) -> None:
     """Increment the heartbeat counter every interval until stopped.
 
     Args:
         instruments: The metric instruments to record onto.
         stop_event: Signaled to stop the loop and exit the thread promptly.
+        kio_id: Attached to every heartbeat data point, matching the
+            platform's kio-simulator convention of labeling kio.heartbeat
+            explicitly rather than relying only on resource promotion.
 
     Returns:
         None.
     """
     while not stop_event.wait(_HEARTBEAT_INTERVAL_SECONDS):
         try:
-            instruments.heartbeat.add(1)
+            instruments.heartbeat.add(1, {"kio.id": kio_id})
         except Exception:
             logger.exception("Failed to record the kio.heartbeat metric")
 
 
-def _start_heartbeat(instruments: _Instruments) -> None:
+def _start_heartbeat(instruments: _Instruments, kio_id: str) -> None:
     """Start the background heartbeat thread, replacing any existing one."""
 
     global _heartbeat_thread
@@ -366,7 +514,7 @@ def _start_heartbeat(instruments: _Instruments) -> None:
     stop_event = threading.Event()
     thread = threading.Thread(
         target=_heartbeat_loop,
-        args=(instruments, stop_event),
+        args=(instruments, stop_event, kio_id),
         name="kio1-otel-heartbeat",
         daemon=True,
     )
@@ -410,6 +558,91 @@ def shutdown_telemetry() -> None:
             tracer_provider.shutdown()
         except Exception:
             logger.exception("Failed to shut down the OpenTelemetry tracer provider")
+
+
+def _record_kpi_snapshot(is_error: bool) -> None:
+    """Record one simulated sample of every D1.1 project-management KPI.
+
+    Values are randomized within the baseline/target bands from
+    AI4SWENG_KPI_Metrik_Referansi (same ranges used by the platform's
+    kio-simulator for the KIOs it assigns each KPI to), not derived from
+    anything KIO1 actually measured — every data point carries
+    source="simulated" so it's distinguishable on the platform's dashboards
+    once a real measurement path exists.
+
+    Args:
+        is_error: Whether the current turn ended in an error. Only affects
+            the rare, event-style KPIs (6.2, 8.3), matching kio-simulator's
+            own gating.
+
+    Returns:
+        None.
+    """
+    instruments = _instruments
+    if instruments is None:
+        return
+
+    labels = {"kio.id": _kio_id, "source": "simulated"}
+
+    # KPI 1.1 — Code generation speed: baseline ~100-120 min, target <=70%.
+    instruments.kpi_codegen_duration.record(
+        round(random.uniform(65.0, 95.0), 1), labels
+    )
+    # KPI 1.2 — Issue resolution speed: baseline ~8-12h, target <=70%.
+    instruments.kpi_issue_resolution.record(
+        round(random.uniform(5.0, 9.0), 2), labels
+    )
+    # KPI 2.1 — Lifecycle energy reduction: baseline 100%, target <=85%.
+    instruments.kpi_lifecycle_energy.record(
+        round(random.uniform(78.0, 96.0), 1), labels
+    )
+    # KPI 2.2 — Deployment energy efficiency (tokens/s/W): target >=15% over
+    # an assumed ~7.5 tok/s/W unoptimized baseline.
+    instruments.kpi_deploy_energy_efficiency.record(
+        round(random.uniform(6.5, 10.5), 2), labels
+    )
+    # KPI 3.1 — Code quality improvement: baseline 100%, target <=70%.
+    instruments.kpi_code_quality.record(
+        round(random.uniform(65.0, 90.0), 1), labels
+    )
+    # KPI 3.2 — Review score increase: baseline ~3.5/5, target ~4.2/5.
+    instruments.kpi_review_score.record(round(random.uniform(3.6, 4.4), 2), labels)
+    # KPI 4.1 — Developer productivity: baseline ~0.5-0.8 features/day.
+    instruments.kpi_dev_productivity.record(
+        round(random.uniform(0.6, 1.1), 2), labels
+    )
+    # KPI 5.1 — Time-to-Market: baseline ~5-7 days scaled to D1.1's ~30-45
+    # day pilot-feature baseline, target <=70%.
+    instruments.kpi_time_to_market.record(
+        round(random.uniform(24.0, 38.0), 1), labels
+    )
+    # KPI 6.1 — Bug-fix time: baseline ~8-12h, target <=80%.
+    instruments.kpi_bugfix_duration.record(
+        round(random.uniform(6.0, 10.0), 2), labels
+    )
+    # KPI 6.2 — Customer-reported issues: rare event, only on some errors.
+    if is_error and random.random() < 0.05:
+        instruments.kpi_customer_reported_issues.add(
+            random.randint(1, 2), labels
+        )
+    # KPI 7.1 — Annual cost saving: target range ~12-28%.
+    instruments.kpi_cost_saving.record(round(random.uniform(12.0, 28.0), 1), labels)
+    # KPI 8.1 — Adoption rate: baseline 0%, target >=50%, simulated mid-ramp.
+    instruments.kpi_adoption_rate.record(
+        round(random.uniform(32.0, 58.0), 1), labels
+    )
+    # KPI 8.2 — Active usage & satisfaction: usage target >=60%, MOS >=4.0.
+    instruments.kpi_adoption_usage.record(
+        round(random.uniform(45.0, 68.0), 1), labels
+    )
+    instruments.kpi_adoption_mos.record(round(random.uniform(3.4, 4.3), 2), labels)
+    # KPI 8.3 — Cross-Architecture Build Success Rate: rare, discrete event.
+    if random.random() < 0.05:
+        instruments.kpi_cross_arch_build.add(1, labels)
+    # KPI 9.1 — Refactoring effort reduction: baseline ~2-3h/feature.
+    instruments.kpi_refactoring.record(round(random.uniform(2.5, 4.5), 2), labels)
+    # KPI 9.2 — Technical debt reduction: baseline ~1.0-1.2h/100loc.
+    instruments.kpi_tech_debt.record(round(random.uniform(1.8, 3.5), 2), labels)
 
 
 def _model_attributes(provider: str, model: str) -> dict[str, AttributeValue]:
@@ -497,14 +730,22 @@ def trace_turn(
                 # Contract mandatory metrics (kio_request_count,
                 # kio_request_duration_ms, kio_request_error_count): one
                 # "request" is one complete user turn, mirroring the
-                # platform's kio-simulator request definition.
-                instruments.request_count.add(1, {"status": status})
-                instruments.request_duration_ms.record(elapsed_seconds * 1000)
+                # platform's kio-simulator request definition. kio.id is
+                # attached explicitly (not just via the resource attribute),
+                # matching the platform's kio-simulator convention.
+                instruments.request_count.add(
+                    1, {"status": status, "kio.id": _kio_id}
+                )
+                instruments.request_duration_ms.record(
+                    elapsed_seconds * 1000, {"kio.id": _kio_id}
+                )
 
                 if error_type is not None:
                     instruments.request_error_count.add(
-                        1, {"error_type": error_type}
+                        1, {"error_type": error_type, "kio.id": _kio_id}
                     )
+
+                _record_kpi_snapshot(is_error=status == "error")
 
 
 @contextmanager
@@ -658,7 +899,9 @@ def record_gen_ai_response(
             input_attributes,
         )
         # Contract mandatory metric kio_llm_token_count (tag: direction).
-        instruments.llm_token_count.add(input_tokens, {"direction": "input"})
+        instruments.llm_token_count.add(
+            input_tokens, {"direction": "input", "kio.id": _kio_id}
+        )
 
     if type(output_tokens) is int and output_tokens >= 0:
         output_attributes = dict(metric_attributes)
@@ -667,7 +910,9 @@ def record_gen_ai_response(
             output_tokens,
             output_attributes,
         )
-        instruments.llm_token_count.add(output_tokens, {"direction": "output"})
+        instruments.llm_token_count.add(
+            output_tokens, {"direction": "output", "kio.id": _kio_id}
+        )
 
     total_tokens = 0
     if type(input_tokens) is int and input_tokens >= 0:
@@ -683,7 +928,7 @@ def record_gen_ai_response(
             total_tokens / 1000
         ) * _COST_PER_1K_TOKENS_USD.get(provider, 0.0)
         if cost_usd > 0:
-            instruments.llm_cost_usd.add(cost_usd)
+            instruments.llm_cost_usd.add(cost_usd, {"kio.id": _kio_id})
 
     if truncated:
         normalized_reason = (
@@ -711,7 +956,7 @@ def record_session_started(*, provider: str, model: str) -> None:
         # Contract mandatory metric kio_session_active_count. Best-effort:
         # if the process is killed before record_session_completed() runs,
         # this count will not be decremented until telemetry re-initializes.
-        instruments.session_active_count.add(1)
+        instruments.session_active_count.add(1, {"kio.id": _kio_id})
 
 
 def record_session_completed(
@@ -727,7 +972,7 @@ def record_session_completed(
         metric_attributes = _model_attributes(provider, model)
         metric_attributes["kio1.status"] = "success" if success else "error"
         instruments.sessions_completed.add(1, metric_attributes)
-        instruments.session_active_count.add(-1)
+        instruments.session_active_count.add(-1, {"kio.id": _kio_id})
 
 
 def record_format_fallback() -> None:

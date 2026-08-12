@@ -48,7 +48,7 @@ See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
 ## Observability
 
-KIO1 can export OpenTelemetry traces and metrics to a local persistent Tempo and Prometheus stack. Telemetry is disabled by default.
+<!-- KIO1 can export OpenTelemetry traces and metrics to a local persistent Tempo and Prometheus stack. Telemetry is disabled by default.
 
 Start the observability services with:
 
@@ -56,7 +56,7 @@ Start the observability services with:
 docker compose -f observability/compose.telemetry.yaml up -d
 ```
 
-See the [Observability Guide](docs/observability.md) for configuration, querying, retention, and safe-shutdown instructions.
+See the [Observability Guide](docs/observability.md) for configuration, querying, retention, and safe-shutdown instructions. -->
 
 ## Running Tests
 

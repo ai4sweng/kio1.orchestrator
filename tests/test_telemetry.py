@@ -70,6 +70,7 @@ def test_interrupted_turn_is_recorded_as_error() -> None:
     with (
         patch.object(telemetry, "_tracer", tracer),
         patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_record_kpi_snapshot"),
         patch.object(
             telemetry,
             "perf_counter",
@@ -218,7 +219,7 @@ def test_disabled_telemetry_does_not_create_exporters(
         patch.object(telemetry, "OTLPSpanExporter") as span_exporter,
         patch.object(telemetry, "OTLPMetricExporter") as metric_exporter,
     ):
-        telemetry.init_telemetry(TelemetryConfig())
+        telemetry.init_telemetry(TelemetryConfig(), llm="test-model")
 
     span_exporter.assert_not_called()
     metric_exporter.assert_not_called()
@@ -304,7 +305,10 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
                 otlp_http_endpoint="http://collector:4318",
                 metric_export_interval_ms=2500,
                 trace_sample_ratio=0.25,
-            )
+                kio_id="kio1",
+            ),
+            llm="test-model",
+            task_type="orchestration",
         )
 
     span_exporter_factory.assert_called_once_with(
@@ -324,10 +328,11 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
 
     tracer_provider_arguments = tracer_provider_factory.call_args.kwargs
     assert tracer_provider_arguments["shutdown_on_exit"] is False
-    assert (
-        tracer_provider_arguments["resource"].attributes["service.name"]
-        == "test-orchestrator"
-    )
+    resource_attributes = tracer_provider_arguments["resource"].attributes
+    assert resource_attributes["service.name"] == "test-orchestrator"
+    assert resource_attributes["kio.id"] == "kio1"
+    assert resource_attributes["llm"] == "test-model"
+    assert resource_attributes["task_type"] == "orchestration"
 
     meter_provider_factory.assert_called_once_with(
         resource=tracer_provider_arguments["resource"],
@@ -380,6 +385,7 @@ def test_turn_metrics_exclude_session_identifiers() -> None:
     with (
         patch.object(telemetry, "_tracer", tracer),
         patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_record_kpi_snapshot"),
         patch.object(
             telemetry,
             "perf_counter",
@@ -591,10 +597,10 @@ def test_heartbeat_loop_ticks_until_stopped() -> None:
     stop_event = MagicMock()
     stop_event.wait.side_effect = [False, False, True]
 
-    telemetry._heartbeat_loop(instruments, stop_event)
+    telemetry._heartbeat_loop(instruments, stop_event, "kio1")
 
     assert instruments.heartbeat.add.call_count == 2
-    instruments.heartbeat.add.assert_called_with(1)
+    instruments.heartbeat.add.assert_called_with(1, {"kio.id": "kio1"})
     stop_event.wait.assert_called_with(telemetry._HEARTBEAT_INTERVAL_SECONDS)
 
 
@@ -609,12 +615,12 @@ def test_start_heartbeat_replaces_existing_thread(
     monkeypatch.setattr(telemetry, "_HEARTBEAT_INTERVAL_SECONDS", 3600.0)
 
     try:
-        telemetry._start_heartbeat(instruments)
+        telemetry._start_heartbeat(instruments, "kio1")
         first_thread = telemetry._heartbeat_thread
         assert first_thread is not None
         assert first_thread.is_alive()
 
-        telemetry._start_heartbeat(instruments)
+        telemetry._start_heartbeat(instruments, "kio1")
         second_thread = telemetry._heartbeat_thread
         assert second_thread is not first_thread
         assert not first_thread.is_alive()
@@ -641,6 +647,8 @@ def test_trace_turn_records_contract_request_metrics() -> None:
     with (
         patch.object(telemetry, "_tracer", tracer),
         patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+        patch.object(telemetry, "_record_kpi_snapshot"),
         patch.object(
             telemetry,
             "perf_counter",
@@ -655,9 +663,11 @@ def test_trace_turn_records_contract_request_metrics() -> None:
         ):
             pass
 
-    instruments.request_count.add.assert_called_once_with(1, {"status": "success"})
+    instruments.request_count.add.assert_called_once_with(
+        1, {"status": "success", "kio.id": "kio1"}
+    )
     instruments.request_duration_ms.record.assert_called_once_with(
-        pytest.approx(400.0)
+        pytest.approx(400.0), {"kio.id": "kio1"}
     )
     instruments.request_error_count.add.assert_not_called()
 
@@ -677,6 +687,8 @@ def test_trace_turn_records_contract_error_metrics() -> None:
     with (
         patch.object(telemetry, "_tracer", tracer),
         patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+        patch.object(telemetry, "_record_kpi_snapshot"),
         patch.object(
             telemetry,
             "perf_counter",
@@ -692,9 +704,11 @@ def test_trace_turn_records_contract_error_metrics() -> None:
         ):
             raise RuntimeError("boom")
 
-    instruments.request_count.add.assert_called_once_with(1, {"status": "error"})
+    instruments.request_count.add.assert_called_once_with(
+        1, {"status": "error", "kio.id": "kio1"}
+    )
     instruments.request_error_count.add.assert_called_once_with(
-        1, {"error_type": "RuntimeError"}
+        1, {"error_type": "RuntimeError", "kio.id": "kio1"}
     )
 
 
@@ -718,6 +732,7 @@ def test_record_gen_ai_response_records_contract_token_and_cost_metrics() -> Non
             return_value=span,
         ),
         patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
     ):
         telemetry.record_gen_ai_response(
             provider="openai",
@@ -726,9 +741,15 @@ def test_record_gen_ai_response_records_contract_token_and_cost_metrics() -> Non
             output_tokens=250,
         )
 
-    instruments.llm_token_count.add.assert_any_call(750, {"direction": "input"})
-    instruments.llm_token_count.add.assert_any_call(250, {"direction": "output"})
-    instruments.llm_cost_usd.add.assert_called_once_with(pytest.approx(0.002))
+    instruments.llm_token_count.add.assert_any_call(
+        750, {"direction": "input", "kio.id": "kio1"}
+    )
+    instruments.llm_token_count.add.assert_any_call(
+        250, {"direction": "output", "kio.id": "kio1"}
+    )
+    instruments.llm_cost_usd.add.assert_called_once_with(
+        pytest.approx(0.002), {"kio.id": "kio1"}
+    )
 
 
 def test_record_gen_ai_response_skips_cost_for_free_provider() -> None:
@@ -771,7 +792,10 @@ def test_session_started_and_completed_track_active_count() -> None:
         session_active_count=MagicMock(),
     )
 
-    with patch.object(telemetry, "_instruments", instruments):
+    with (
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+    ):
         telemetry.record_session_started(provider="ollama", model="test-model")
         telemetry.record_session_completed(
             provider="ollama",
@@ -779,4 +803,109 @@ def test_session_started_and_completed_track_active_count() -> None:
             success=True,
         )
 
-    instruments.session_active_count.add.assert_has_calls([call(1), call(-1)])
+    instruments.session_active_count.add.assert_has_calls(
+        [call(1, {"kio.id": "kio1"}), call(-1, {"kio.id": "kio1"})]
+    )
+
+
+_KPI_INSTRUMENT_NAMES = [
+    "kpi_codegen_duration",
+    "kpi_issue_resolution",
+    "kpi_lifecycle_energy",
+    "kpi_deploy_energy_efficiency",
+    "kpi_code_quality",
+    "kpi_review_score",
+    "kpi_dev_productivity",
+    "kpi_time_to_market",
+    "kpi_bugfix_duration",
+    "kpi_customer_reported_issues",
+    "kpi_cost_saving",
+    "kpi_adoption_rate",
+    "kpi_adoption_usage",
+    "kpi_adoption_mos",
+    "kpi_cross_arch_build",
+    "kpi_refactoring",
+    "kpi_tech_debt",
+]
+
+
+def test_record_kpi_snapshot_records_every_d11_kpi() -> None:
+    """Verify every D1.1 KPI histogram is recorded, labeled as simulated."""
+
+    instruments = SimpleNamespace(
+        **{name: MagicMock() for name in _KPI_INSTRUMENT_NAMES}
+    )
+    labels = {"kio.id": "kio1", "source": "simulated"}
+
+    with (
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+        patch.object(telemetry.random, "uniform", return_value=1.0),
+        # Keep the rare, event-style KPIs (6.2, 8.3) from firing here; their
+        # gating is covered by test_record_kpi_snapshot_gated_events_fire_*.
+        patch.object(telemetry.random, "random", return_value=0.99),
+    ):
+        telemetry._record_kpi_snapshot(is_error=False)
+
+    for histogram_name in (
+        "kpi_codegen_duration",
+        "kpi_issue_resolution",
+        "kpi_lifecycle_energy",
+        "kpi_deploy_energy_efficiency",
+        "kpi_code_quality",
+        "kpi_review_score",
+        "kpi_dev_productivity",
+        "kpi_time_to_market",
+        "kpi_bugfix_duration",
+        "kpi_cost_saving",
+        "kpi_adoption_rate",
+        "kpi_adoption_usage",
+        "kpi_adoption_mos",
+        "kpi_refactoring",
+        "kpi_tech_debt",
+    ):
+        getattr(instruments, histogram_name).record.assert_called_once_with(
+            1.0, labels
+        )
+
+    instruments.kpi_customer_reported_issues.add.assert_not_called()
+    instruments.kpi_cross_arch_build.add.assert_not_called()
+
+
+def test_record_kpi_snapshot_gated_events_fire_on_low_random_and_error() -> None:
+    """Verify the rare event-style KPIs (6.2, 8.3) fire when their gate opens."""
+
+    instruments = SimpleNamespace(
+        **{name: MagicMock() for name in _KPI_INSTRUMENT_NAMES}
+    )
+    labels = {"kio.id": "kio1", "source": "simulated"}
+
+    with (
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+        patch.object(telemetry.random, "uniform", return_value=1.0),
+        patch.object(telemetry.random, "random", return_value=0.01),
+        patch.object(telemetry.random, "randint", return_value=2),
+    ):
+        telemetry._record_kpi_snapshot(is_error=True)
+
+    instruments.kpi_customer_reported_issues.add.assert_called_once_with(2, labels)
+    instruments.kpi_cross_arch_build.add.assert_called_once_with(1, labels)
+
+
+def test_record_kpi_snapshot_skips_customer_reported_when_not_an_error() -> None:
+    """Verify KPI 6.2 never fires on a successful turn, even if the gate opens."""
+
+    instruments = SimpleNamespace(
+        **{name: MagicMock() for name in _KPI_INSTRUMENT_NAMES}
+    )
+
+    with (
+        patch.object(telemetry, "_instruments", instruments),
+        patch.object(telemetry, "_kio_id", "kio1"),
+        patch.object(telemetry.random, "uniform", return_value=1.0),
+        patch.object(telemetry.random, "random", return_value=0.01),
+    ):
+        telemetry._record_kpi_snapshot(is_error=False)
+
+    instruments.kpi_customer_reported_issues.add.assert_not_called()

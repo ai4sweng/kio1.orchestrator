@@ -34,7 +34,7 @@ def main() -> None:
         logger.info("Session started: session_id=%s", session_id)
 
         config = load_config()
-        init_telemetry(config.telemetry)
+        init_telemetry(config.telemetry, llm=config.model)
 
         startup_attributes = {
             "gen_ai.provider.name": config.provider,
