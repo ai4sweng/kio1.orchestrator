@@ -11,7 +11,7 @@
     "telemetry": {
         "enabled": true,
         "service_name": "kio1-orchestrator",
-        "otlp_http_endpoint": "http://157.230.17.89:4318",
+        "otlp_http_endpoint": "http://192.168.0.103:4317",
         "metric_export_interval_ms": 5000,
         "trace_sample_ratio": 1.0,
         "kio_id": "kio1",

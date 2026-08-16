@@ -147,6 +147,8 @@ When enabled, `otlp_http_endpoint` is treated as the OTLP/HTTP base URL. The app
 
 Trace sampling does not disable metrics.
 
+If the OTLP Collector requires authentication, set the `OTLP_BEARER_TOKEN` environment variable (never in `config.json`, to keep the token out of source control). When set, it is sent as `Authorization: Bearer <token>` on both the trace and metric exporters. When unset, requests are sent without an `Authorization` header, and the Collector will reject them with a timeout/retry failure if it requires one — see [troubleshooting.md](troubleshooting.md).
+
 `metric_export_interval_ms` controls how frequently metrics are sent. Smaller values update Prometheus more frequently but increase export activity.
 
 For setup, querying, retention, and safe shutdown instructions, see the [Observability Guide](observability.md).

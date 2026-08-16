@@ -245,6 +245,7 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
 
     monkeypatch.setattr(telemetry, "_tracer_provider", None)
     monkeypatch.setattr(telemetry, "_meter_provider", None)
+    monkeypatch.setenv("OTLP_BEARER_TOKEN", "test-token")
 
     span_exporter = MagicMock()
     metric_exporter = MagicMock()
@@ -312,10 +313,12 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
         )
 
     span_exporter_factory.assert_called_once_with(
-        endpoint="http://collector:4318/v1/traces"
+        endpoint="http://collector:4318/v1/traces",
+        headers={"Authorization": "Bearer test-token"},
     )
     metric_exporter_factory.assert_called_once_with(
-        endpoint="http://collector:4318/v1/metrics"
+        endpoint="http://collector:4318/v1/metrics",
+        headers={"Authorization": "Bearer test-token"},
     )
 
     span_processor_factory.assert_called_once_with(span_exporter)
@@ -347,6 +350,48 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
     assert telemetry._tracer is tracer
     assert telemetry._meter is meter
     assert telemetry._instruments is instruments
+
+
+def test_init_telemetry_omits_auth_header_without_bearer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Verify exporters get no Authorization header when the token is unset."""
+
+    for attribute_name in (
+        "_tracer_provider",
+        "_meter_provider",
+        "_tracer",
+        "_meter",
+        "_instruments",
+    ):
+        monkeypatch.setattr(
+            telemetry,
+            attribute_name,
+            getattr(telemetry, attribute_name),
+        )
+
+    monkeypatch.setattr(telemetry, "_tracer_provider", None)
+    monkeypatch.setattr(telemetry, "_meter_provider", None)
+    monkeypatch.delenv("OTLP_BEARER_TOKEN", raising=False)
+
+    with (
+        patch.object(telemetry, "OTLPSpanExporter") as span_exporter_factory,
+        patch.object(telemetry, "OTLPMetricExporter") as metric_exporter_factory,
+        patch.object(telemetry, "TracerProvider") as tracer_provider_factory,
+        patch.object(telemetry, "MeterProvider") as meter_provider_factory,
+        patch.object(telemetry.trace, "set_tracer_provider"),
+        patch.object(telemetry.metrics, "set_meter_provider"),
+    ):
+        tracer_provider_factory.return_value.get_tracer.return_value = MagicMock()
+        meter_provider_factory.return_value.get_meter.return_value = MagicMock()
+
+        telemetry.init_telemetry(
+            TelemetryConfig(enabled=True),
+            llm="test-model",
+        )
+
+    assert span_exporter_factory.call_args.kwargs["headers"] is None
+    assert metric_exporter_factory.call_args.kwargs["headers"] is None
 
 
 def test_trace_operation_marks_errors_without_recording_messages() -> None:
