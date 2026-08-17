@@ -11,8 +11,8 @@
     "telemetry": {
         "enabled": true,
         "service_name": "kio1-orchestrator",
-        "otlp_http_endpoint": "http://192.168.0.103:4318",
-        "otlp_bearer_token": "local-dev-otlp-token",
+        "otlp_http_endpoint": "http://YOUR_HOST:4318", // Replace with your actual endpoint, my otlp endpoint is localhost, so i replace with 192.168. . . , if we use static ip, digitalocean server or tailscale our work is very easy.  
+        "otlp_bearer_token": "local-dev-otlp-token",  // Replace with your actual token, my otlp token is local-dev-otlp-token
         "metric_export_interval_ms": 5000,
         "trace_sample_ratio": 1.0,
         "kio_id": "kio1",
