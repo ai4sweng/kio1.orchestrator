@@ -101,6 +101,7 @@ class TestConfigLoader:
                 "enabled": True,
                 "service_name": "test-orchestrator",
                 "otlp_http_endpoint": "http://collector:4318/",
+                "otlp_bearer_token": "test-token",
                 "metric_export_interval_ms": 2500,
                 "trace_sample_ratio": 0.5,
             },
@@ -126,6 +127,7 @@ class TestConfigLoader:
             enabled=True,
             service_name="test-orchestrator",
             otlp_http_endpoint="http://collector:4318",
+            otlp_bearer_token="test-token",
             metric_export_interval_ms=2500,
             trace_sample_ratio=0.5,
         )

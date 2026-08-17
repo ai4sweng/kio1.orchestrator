@@ -15,6 +15,7 @@ class TelemetryConfig:
     enabled: bool = False
     service_name: str = "kio1-orchestrator"
     otlp_http_endpoint: str = "http://localhost:4318"
+    otlp_bearer_token: str = ""
     metric_export_interval_ms: int = 5000
     trace_sample_ratio: float = 1.0
     kio_id: str = "kio1"
@@ -79,6 +80,10 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
             "telemetry.otlp_http_endpoint must be a non-empty HTTP(S) URL."
         )
 
+    bearer_token = telemetry_data.get("otlp_bearer_token", "")
+    if not isinstance(bearer_token, str):
+        raise ValueError("telemetry.otlp_bearer_token must be a string.")
+
     export_interval = telemetry_data.get("metric_export_interval_ms", 5000)
     if type(export_interval) is not int or export_interval <= 0:
         raise ValueError(
@@ -110,6 +115,7 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
         enabled=enabled,
         service_name=service_name.strip(),
         otlp_http_endpoint=endpoint,
+        otlp_bearer_token=bearer_token.strip(),
         metric_export_interval_ms=export_interval,
         trace_sample_ratio=float(sample_ratio),
         kio_id=kio_id.strip(),

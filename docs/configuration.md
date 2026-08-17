@@ -21,6 +21,7 @@ All application settings are stored in `config.json` at the project root.
 | `telemetry.enabled` | boolean | Enables trace and metric export (default: `false`) |
 | `telemetry.service_name` | string | Non-empty service name attached to exported telemetry (default: `kio1-orchestrator`) |
 | `telemetry.otlp_http_endpoint` | string | OpenTelemetry Collector OTLP/HTTP base URL (default: `http://localhost:4318`) |
+| `telemetry.otlp_bearer_token` | string | Bearer token sent as `Authorization: Bearer <token>` to the Collector, if it requires authentication (default: `""`, no header sent) |
 | `telemetry.metric_export_interval_ms` | int | Positive metric-export interval in milliseconds (default: `5000`) |
 | `telemetry.trace_sample_ratio` | number | Fraction of traces sampled, from `0.0` to `1.0` (default: `1.0`) |
 
@@ -41,6 +42,7 @@ All application settings are stored in `config.json` at the project root.
         "enabled": false,
         "service_name": "kio1-orchestrator",
         "otlp_http_endpoint": "http://localhost:4318",
+        "otlp_bearer_token": "",
         "metric_export_interval_ms": 5000,
         "trace_sample_ratio": 1.0
     },
@@ -147,7 +149,7 @@ When enabled, `otlp_http_endpoint` is treated as the OTLP/HTTP base URL. The app
 
 Trace sampling does not disable metrics.
 
-If the OTLP Collector requires authentication, set the `OTLP_BEARER_TOKEN` environment variable (never in `config.json`, to keep the token out of source control). When set, it is sent as `Authorization: Bearer <token>` on both the trace and metric exporters. When unset, requests are sent without an `Authorization` header, and the Collector will reject them with a timeout/retry failure if it requires one — see [troubleshooting.md](troubleshooting.md).
+If the OTLP Collector requires authentication, set `telemetry.otlp_bearer_token` in `config.json`. When set, it is sent as `Authorization: Bearer <token>` on both the trace and metric exporters. When left empty (the default), requests are sent without an `Authorization` header; if the Collector requires one, exports fail with a timeout/retry error rather than a clear auth error — see [troubleshooting.md](troubleshooting.md).
 
 `metric_export_interval_ms` controls how frequently metrics are sent. Smaller values update Prometheus more frequently but increase export activity.
 

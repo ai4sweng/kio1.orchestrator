@@ -245,7 +245,6 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
 
     monkeypatch.setattr(telemetry, "_tracer_provider", None)
     monkeypatch.setattr(telemetry, "_meter_provider", None)
-    monkeypatch.setenv("OTLP_BEARER_TOKEN", "test-token")
 
     span_exporter = MagicMock()
     metric_exporter = MagicMock()
@@ -304,6 +303,7 @@ def test_init_telemetry_builds_otlp_signal_endpoints(
                 enabled=True,
                 service_name="test-orchestrator",
                 otlp_http_endpoint="http://collector:4318",
+                otlp_bearer_token="test-token",
                 metric_export_interval_ms=2500,
                 trace_sample_ratio=0.25,
                 kio_id="kio1",
@@ -372,7 +372,6 @@ def test_init_telemetry_omits_auth_header_without_bearer_token(
 
     monkeypatch.setattr(telemetry, "_tracer_provider", None)
     monkeypatch.setattr(telemetry, "_meter_provider", None)
-    monkeypatch.delenv("OTLP_BEARER_TOKEN", raising=False)
 
     with (
         patch.object(telemetry, "OTLPSpanExporter") as span_exporter_factory,

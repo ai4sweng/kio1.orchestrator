@@ -1,5 +1,4 @@
 import logging
-import os
 import random
 import threading
 from collections.abc import Iterator
@@ -78,13 +77,6 @@ _REQUEST_DURATION_MS_BUCKETS = tuple(
 )
 
 _HEARTBEAT_INTERVAL_SECONDS = 60.0
-
-# Bearer token for the OTLP Collector, read from the environment (never from
-# config.json) so it isn't committed to source control alongside the rest of
-# the telemetry config — same convention as the provider API keys in
-# openai_client.py / anthropic_client.py. Matches the OTLP_BEARER_TOKEN
-# environment variable used by the observability stack's docker-compose.
-_OTLP_BEARER_TOKEN_ENV_VAR = "OTLP_BEARER_TOKEN"
 
 # Rough, non-billing-accurate USD-per-1K-token estimate used only because the
 # contract's kio_llm_cost_usd metric is mandatory and none of the providers
@@ -440,15 +432,15 @@ def init_telemetry(
         }
     )
 
-    bearer_token = os.getenv(_OTLP_BEARER_TOKEN_ENV_VAR)
     headers = (
-        {"Authorization": f"Bearer {bearer_token}"} if bearer_token else None
+        {"Authorization": f"Bearer {config.otlp_bearer_token}"}
+        if config.otlp_bearer_token
+        else None
     )
     if headers is None:
         logger.warning(
-            "%s is not set; OTLP requests will be sent without an "
-            "Authorization header",
-            _OTLP_BEARER_TOKEN_ENV_VAR,
+            "telemetry.otlp_bearer_token is not set; OTLP requests will be "
+            "sent without an Authorization header"
         )
 
     trace_exporter = OTLPSpanExporter(

@@ -125,10 +125,12 @@ Failed to export metrics batch
 
 mean the application cannot reach the configured OpenTelemetry Collector, or the Collector rejected the request.
 
-If the Collector requires bearer-token authentication (an `OTLP_BEARER_TOKEN` set on the Collector side, e.g. via its `docker-compose` environment), KIO1 must send the same token back, or every export attempt fails with this same timeout/retry message — the OTLP/HTTP exporter does not surface `401`/`403` responses distinctly from network failures. Set `OTLP_BEARER_TOKEN` in KIO1's environment (not `config.json`) to match the Collector's configured token before starting KIO1:
+If the Collector requires bearer-token authentication (an `OTLP_BEARER_TOKEN` set on the Collector side, e.g. via its `docker-compose` environment), KIO1 must send the same token back, or every export attempt fails with this same timeout/retry message — the OTLP/HTTP exporter does not surface `401`/`403` responses distinctly from network failures. Set `telemetry.otlp_bearer_token` in `config.json` to match the Collector's configured token:
 
-```bash
-export OTLP_BEARER_TOKEN=local-dev-otlp-token
+```json
+"telemetry": {
+    "otlp_bearer_token": "local-dev-otlp-token"
+}
 ```
 
 Confirm that the observability stack is running:
