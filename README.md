@@ -57,6 +57,7 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 
 - [Architecture](docs/architecture.md) — System overview, components, and data flow
 - [Configuration](docs/configuration.md) — All config.json settings explained
+- [Dispatch](docs/dispatch.md) — Sending plan steps to KIO agents, dependencies, KIO10 contract, stub agent
 - [Usage Guide](docs/usage.md) — Interactive session examples and workflows
 - [API Reference](docs/api-reference.md) — Module and function documentation
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification

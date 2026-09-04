@@ -9,6 +9,7 @@ from chat_history import (
     load_messages,
 )
 from config_loader import load_config
+from kio10.dispatcher import dispatch_plan
 from prompt_loader import load_prompt
 from provider_client import load_provider
 from session_logger import generate_session_id, init_logger
@@ -80,6 +81,11 @@ def main() -> None:
                 append_user_message(chat_file, query)
                 append_assistant_message(chat_file, content)
                 print(f"\n{formatted}")
+
+                if config.dispatch.enabled:
+                    print(
+                        f"\n{dispatch_plan(formatted, config.dispatch, 'logs', session_id)}"
+                    )
 
             except Exception as e:
                 logger.exception("Request failed: turn=%d", turn)

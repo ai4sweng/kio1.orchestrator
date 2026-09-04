@@ -25,6 +25,20 @@ chat_history  --> create_chat_file(chat_directory, system_prompt, session_id)
               --> load_messages()
 
 formatter     --> format_json()
+
+workflow_plan --> Step, WorkflowPlan (dataclasses)
+              --> parse_plan(data)
+
+kio10.transport --> KIO10Transport (Protocol), TransportError
+                --> build_request(workflow_id, step, data)
+                --> run_job(transport, request, poll_interval)
+                --> HttpKIO10, create_transport(address, timeout)
+
+kio10.stub    --> StubKIO10
+
+kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
+                 --> run_workflow(plan, settings, transports=None)
+                 --> format_report(), write_report(), dispatch_plan()
 ```
 
 ## `config_loader`
@@ -140,3 +154,51 @@ Returns all messages from the chat file, excluding the system prompt.
 ### `format_json(raw_json) -> str`
 
 Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `ast.literal_eval` for single-quoted Python dict output from the model.
+
+## `workflow_plan`
+
+### `Step` / `WorkflowPlan` (dataclasses)
+
+`Step` carries `step_id`, `agent_id`, `capability`, `task` and `depends_on` (tuple of step ids). `WorkflowPlan` carries `workflow_id`, `execution_mode`, `steps` and `explanation`.
+
+### `parse_plan(data) -> WorkflowPlan`
+
+Validates a raw plan dict. Derives `depends_on` from `execution_mode` when no step declares it. Raises `ValueError` on missing fields, unknown `execution_mode`, duplicate step ids, unknown dependencies or cycles.
+
+## `kio10.transport`
+
+### `build_request(workflow_id, step, data) -> dict`
+
+Builds the KIO1 → KIO10 request message from the integration document.
+
+### `run_job(transport, request, poll_interval) -> dict`
+
+Submits the request, checks the acknowledgement, then polls `get_job` until the status is `success`, `needs_clarification` or `failure`. Raises `TransportError` when a reply violates the contract.
+
+### `HttpKIO10(base_url, timeout, httpx_transport=None)`
+
+Transport over `POST /jobs` and `GET /jobs/{job_id}` using `httpx2.AsyncClient`. Connection errors, HTTP error statuses and non-JSON bodies become `TransportError`.
+
+### `create_transport(address, timeout) -> KIO10Transport`
+
+Returns `HttpKIO10` for `http://`/`https://` addresses and `StubKIO10` for `stub://`.
+
+## `kio10.stub`
+
+### `StubKIO10(polls_before_done=1)`
+
+In-memory KIO10. `submit` is idempotent per `(workflow_id, step_id)`; `get_job` returns the acknowledgement for `polls_before_done` polls, then a final reply chosen by the `[stub:fail]` / `[stub:clarify]` markers in the task.
+
+## `kio10.dispatcher`
+
+### `run_workflow(plan, settings, transports=None) -> DispatchReport`
+
+Coroutine. Runs every step as an `asyncio` task; a step awaits its dependencies, is skipped when its agent is not in `transports`/`settings.agents` or a dependency did not succeed, and otherwise submits and polls with `settings.step_timeout_seconds` as the limit.
+
+### `format_report(report) -> str`, `write_report(report, log_directory, session_id) -> Path`
+
+Terminal table and JSON file `dispatch_<session_id>_<workflow_id>.json`.
+
+### `dispatch_plan(plan_json, settings, log_directory, session_id) -> str`
+
+Convenience entry point used by `main.py`: parse, run, store, and return the terminal summary.

@@ -3,7 +3,7 @@
 VENV        := .venv
 PYTHON      := $(VENV)/bin/python
 PIP         := $(VENV)/bin/pip
-SOURCES     := *.py tests/
+SOURCES     := *.py kio10/ tests/
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────
 
