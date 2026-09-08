@@ -16,8 +16,7 @@ Respond **ONLY** with valid JSON.
       "step_id": "s1",
       "agent_id": "KIO<N>",
       "capability": "<capability_name>",
-      "task": "<description of the task for this agent>",
-      "depends_on": ["<step_id of a step whose result this step needs>"]
+      "task": "<description of the task for this agent>"
     }
   ],
   "explanation": "Brief summary of the plan."
@@ -78,24 +77,17 @@ Respond **ONLY** with valid JSON.
    - Use "parallel" when all steps can run independently.
    - Use "mixed" when some steps can run in parallel and others are sequential.
 
-4. **Step Dependencies**:
-   - "depends_on" is optional. It lists the step_ids whose results a step needs before it can start.
-   - Steps with no "depends_on" (or an empty list) can start immediately; steps sharing the same dependencies run together.
-   - "depends_on" may only reference step_ids defined earlier in the same plan and must never form a cycle.
-   - Always include "depends_on" on every step when execution_mode is "mixed"; without it a mixed plan is executed sequentially.
-   - When execution_mode is "sequential" or "parallel", "depends_on" may be omitted: sequential steps depend on the previous step, parallel steps depend on nothing.
-
-5. **Workflow IDs**:
+4. **Workflow IDs**:
    - Generate a short unique workflow_id prefixed with "wf-".
 
-6. **Completeness**:
+5. **Completeness**:
    - Include ALL agents that are relevant to the request.
    - A full software-development lifecycle request should include: requirements (KIO3) -> architecture (KIO4) -> code generation (KIO7) -> testing (KIO11) -> deployment (KIO8).
    - If the domain involves medical, automotive, or safety-critical software, include compliance review (KIO9).
    - If the domain involves IoT or embedded systems, consider energy efficiency (KIO10).
    - If the domain involves sensitive data or network exposure, include cybersecurity (KIO12).
 
-7. **Capability Field**:
+6. **Capability Field**:
    - Use exact capability values from the table above.
    - Select the most specific capability that matches the task.
 
@@ -113,10 +105,6 @@ Output: {"workflow_id": "wf-bug01", "execution_mode": "sequential", "steps": [{"
 Input: "Develop firmware for a patient monitoring wearable device."
 Output: {"workflow_id": "wf-med01", "execution_mode": "sequential", "steps": [{"step_id": "s1", "agent_id": "KIO3", "capability": "requirements_engineering", "task": "Define requirements for patient monitoring wearable firmware"}, {"step_id": "s2", "agent_id": "KIO4", "capability": "architecture_design", "task": "Design embedded firmware architecture for wearable device"}, {"step_id": "s3", "agent_id": "KIO7", "capability": "code_generation", "task": "Generate firmware code for patient monitoring"}, {"step_id": "s4", "agent_id": "KIO10", "capability": "energy_efficiency", "task": "Analyze energy consumption for wearable device"}, {"step_id": "s5", "agent_id": "KIO9", "capability": "compliance_review", "task": "Review firmware for medical device regulatory compliance"}, {"step_id": "s6", "agent_id": "KIO12", "capability": "cybersecurity_validation", "task": "Validate patient data security"}, {"step_id": "s7", "agent_id": "KIO11", "capability": "test_automation", "task": "Create automated tests for firmware"}, {"step_id": "s8", "agent_id": "KIO8", "capability": "packaging", "task": "Package firmware for deployment"}], "explanation": "Full lifecycle for medical wearable firmware with compliance, energy, and security checks."}
 
-### 4: Mixed execution with dependencies
-Input: "Generate synthetic sensor data and validate it, and in parallel review the ingestion service for security issues; then deploy."
-Output: {"workflow_id": "wf-mix01", "execution_mode": "mixed", "steps": [{"step_id": "s1", "agent_id": "KIO5", "capability": "synthetic_data_generation", "task": "Generate synthetic sensor data", "depends_on": []}, {"step_id": "s2", "agent_id": "KIO6", "capability": "data_validation", "task": "Validate the generated sensor data", "depends_on": ["s1"]}, {"step_id": "s3", "agent_id": "KIO12", "capability": "cybersecurity_validation", "task": "Review the ingestion service for security issues", "depends_on": []}, {"step_id": "s4", "agent_id": "KIO8", "capability": "deployment", "task": "Deploy the ingestion service", "depends_on": ["s2", "s3"]}], "explanation": "Data generation and security review run in parallel; validation follows generation; deployment waits for both branches."}
-
-### 5: Data pipeline
+### 4: Data pipeline
 Input: "Create a data pipeline to process and validate customer transaction data."
 Output: {"workflow_id": "wf-dp01", "execution_mode": "sequential", "steps": [{"step_id": "s1", "agent_id": "KIO3", "capability": "requirements_engineering", "task": "Define data pipeline requirements for transaction processing"}, {"step_id": "s2", "agent_id": "KIO4", "capability": "architecture_design", "task": "Design data pipeline architecture"}, {"step_id": "s3", "agent_id": "KIO7", "capability": "code_generation", "task": "Generate data pipeline code"}, {"step_id": "s4", "agent_id": "KIO6", "capability": "data_validation", "task": "Validate data quality and integrity rules"}, {"step_id": "s5", "agent_id": "KIO11", "capability": "test_automation", "task": "Create tests for data pipeline"}, {"step_id": "s6", "agent_id": "KIO8", "capability": "deployment", "task": "Deploy data pipeline"}], "explanation": "Build and deploy a data pipeline with quality validation."}

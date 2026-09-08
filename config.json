@@ -16,6 +16,7 @@
         "enabled": false,
         "poll_interval_seconds": 2,
         "step_timeout_seconds": 600,
+        "max_parallel_steps": 4,
         "agents": {
             "KIO10": "stub://"
         }

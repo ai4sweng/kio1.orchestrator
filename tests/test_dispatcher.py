@@ -10,6 +10,7 @@ from config_loader import DispatchSettings, load_config
 from kio10.dispatcher import (
     DispatchReport,
     StepResult,
+    create_transport,
     dispatch_plan,
     format_report,
     run_workflow,
@@ -17,10 +18,10 @@ from kio10.dispatcher import (
 )
 from kio10.stub import StubKIO10
 from kio10.transport import (
+    SCHEMA_VERSION,
     HttpKIO10,
     TransportError,
     build_request,
-    create_transport,
     run_job,
 )
 from workflow_plan import Step, WorkflowPlan
@@ -56,12 +57,15 @@ def make_step(
 
 
 def make_settings(
-    agents: dict[str, str] | None = None, step_timeout: float = 5.0
+    agents: dict[str, str] | None = None,
+    step_timeout: float = 5.0,
+    max_parallel_steps: int = 4,
 ) -> DispatchSettings:
     return DispatchSettings(
         enabled=True,
         poll_interval_seconds=0,
         step_timeout_seconds=step_timeout,
+        max_parallel_steps=max_parallel_steps,
         agents=agents if agents is not None else {"KIO10": "stub://"},
     )
 
@@ -163,7 +167,15 @@ def test_dispatch_section_fields_have_defaults(tmp_path: Path) -> None:
     assert (
         config.dispatch.step_timeout_seconds == DispatchSettings().step_timeout_seconds
     )
+    assert config.dispatch.max_parallel_steps == DispatchSettings().max_parallel_steps
+    assert DispatchSettings().max_parallel_steps == 4
     assert config.dispatch.agents == {}
+
+
+def test_dispatch_max_parallel_steps_is_parsed(tmp_path: Path) -> None:
+    config = load_config(str(write_config(tmp_path, {"max_parallel_steps": 2})))
+
+    assert config.dispatch.max_parallel_steps == 2
 
 
 @pytest.mark.parametrize(
@@ -173,6 +185,11 @@ def test_dispatch_section_fields_have_defaults(tmp_path: Path) -> None:
         ({"poll_interval_seconds": 0}, "poll_interval_seconds"),
         ({"poll_interval_seconds": -1}, "poll_interval_seconds"),
         ({"step_timeout_seconds": 0}, "step_timeout_seconds"),
+        ({"max_parallel_steps": 0}, "max_parallel_steps"),
+        ({"max_parallel_steps": -1}, "max_parallel_steps"),
+        ({"max_parallel_steps": 2.5}, "max_parallel_steps"),
+        ({"max_parallel_steps": True}, "max_parallel_steps"),
+        ({"max_parallel_steps": "4"}, "max_parallel_steps"),
         ({"agents": ["KIO10"]}, "agents"),
         ({"agents": {"KIO10": 8010}}, "agents"),
         ({"agents": {"KIO10": "amqp://broker"}}, "amqp"),
@@ -194,7 +211,7 @@ def test_invalid_dispatch_section_is_rejected(
 def make_request(step_id: str = "s7", task: str = "assess energy") -> dict[str, Any]:
     """Build a KIO1 -> KIO10 request in the documented format."""
     return {
-        "schema_version": "1.0",
+        "schema_version": SCHEMA_VERSION,
         "workflow_id": "wf-test01",
         "step_id": step_id,
         "capability": "energy_efficiency",
@@ -385,10 +402,13 @@ class _MisbehavingAgent:
     async def get_job(self, job_id: str) -> dict[str, Any]:
         return self._reply
 
+    async def aclose(self) -> None:
+        pass
+
 
 def _ack(**overrides: Any) -> dict[str, Any]:
     ack = {
-        "schema_version": "1.0",
+        "schema_version": SCHEMA_VERSION,
         "workflow_id": "wf-test01",
         "step_id": "s7",
         "job_id": "kio10-job-1",
@@ -420,6 +440,113 @@ def test_run_job_rejects_reply_for_a_different_step() -> None:
 
     with pytest.raises(TransportError, match="s9"):
         asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+@pytest.mark.parametrize("schema_version", ["2.0", "", None])
+def test_run_job_rejects_acknowledgement_with_wrong_schema_version(
+    schema_version: Any,
+) -> None:
+    ack = _ack()
+    ack["schema_version"] = schema_version
+    agent = _MisbehavingAgent(ack, _ack(status="success"))
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="schema_version"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+@pytest.mark.parametrize("schema_version", ["2.0", "", None])
+def test_run_job_rejects_final_reply_with_wrong_schema_version(
+    schema_version: Any,
+) -> None:
+    reply = _ack(status="success")
+    reply["schema_version"] = schema_version
+    agent = _MisbehavingAgent(_ack(), reply)
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="schema_version"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+def test_run_job_rejects_reply_without_schema_version() -> None:
+    reply = _ack(status="success")
+    del reply["schema_version"]
+    agent = _MisbehavingAgent(_ack(), reply)
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="schema_version"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+class _ScriptedAgent:
+    """Transport double replying with a fixed final body for every job."""
+
+    def __init__(self, final: dict[str, Any]) -> None:
+        self._final = final
+        self._envelope: dict[str, Any] = {}
+
+    async def submit(self, request: dict[str, Any]) -> dict[str, Any]:
+        self._envelope = {
+            "workflow_id": request["workflow_id"],
+            "step_id": request["step_id"],
+        }
+        return {**_ack(), **self._envelope}
+
+    async def get_job(self, job_id: str) -> dict[str, Any]:
+        return {**_ack(), **self._envelope, **self._final}
+
+    async def aclose(self) -> None:
+        pass
+
+
+@pytest.mark.parametrize(
+    "final",
+    [
+        {"status": "success", "artifacts": [{"name": "x"}]},
+        {"status": "success", "artifacts": {"x": "shm://artifacts/a"}},
+        {
+            "status": "success",
+            "artifacts": {"x": {"schema_id": "s/1.0", "receipt": "shm://a"}},
+        },
+        {
+            "status": "success",
+            "artifacts": {"x": {"schema_id": "s/1.0", "receipt": {"uri": 7}}},
+        },
+        {"status": "needs_clarification", "clarification": "just text"},
+        {"status": "failure", "failure_class": ["not", "a", "string"]},
+    ],
+    ids=[
+        "artifacts-list",
+        "artifact-str",
+        "receipt-str",
+        "uri-int",
+        "clarification-str",
+        "failure_class-list",
+    ],
+)
+def test_malformed_final_reply_body_is_reported_as_error_not_crash(
+    final: dict[str, Any],
+) -> None:
+    plan = make_plan(make_step("s1"), make_step("s2", ("s1",)))
+
+    results = by_id(
+        run(plan, make_settings(), transports={"KIO10": _ScriptedAgent(final)})
+    )
+
+    assert results["s1"].status == "error"
+    assert "malformed" in results["s1"].detail
+    assert results["s2"].status == "skipped"
+
+
+def test_success_reply_without_artifacts_field_is_accepted() -> None:
+    plan = make_plan(make_step("s1"), make_step("s2", ("s1",)))
+    agent = _ScriptedAgent({"status": "success"})
+
+    results = by_id(run(plan, make_settings(), transports={"KIO10": agent}))
+
+    assert results["s1"].status == "success"
+    assert results["s1"].detail == "no artifacts"
+    assert results["s2"].status == "success"
 
 
 def test_run_job_rejects_unknown_final_status() -> None:
@@ -497,6 +624,127 @@ def test_http_transport_posts_request_and_polls_job_endpoint() -> None:
     assert json.loads(seen[0].content) == request
     assert [r.method for r in seen[1:]] == ["GET", "GET"]
     assert str(seen[1].url) == "http://kio10.local/jobs/kio10-job-0042"
+
+
+def _count_async_clients(monkeypatch: pytest.MonkeyPatch) -> list[httpx2.AsyncClient]:
+    """Record every AsyncClient the transport constructs."""
+    created: list[httpx2.AsyncClient] = []
+    real_client = httpx2.AsyncClient
+
+    def counting_client(*args: Any, **kwargs: Any) -> httpx2.AsyncClient:
+        client = real_client(*args, **kwargs)
+        created.append(client)
+        return client
+
+    monkeypatch.setattr(httpx2, "AsyncClient", counting_client)
+    return created
+
+
+def test_http_transport_reuses_one_client_across_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _count_async_clients(monkeypatch)
+    mock, _ = _fake_kio10_server()
+    transport = HttpKIO10("http://kio10.local", timeout=5.0, httpx_transport=mock)
+    request = build_request("wf-test01", make_step(), {})
+
+    asyncio.run(run_job(transport, request, poll_interval=0))
+
+    assert len(created) == 1, "submit and every poll must share one AsyncClient"
+
+
+def test_http_transport_opens_a_new_client_when_used_from_another_event_loop(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created = _count_async_clients(monkeypatch)
+    mock, _ = _fake_kio10_server()
+    transport = HttpKIO10("http://kio10.local", timeout=5.0, httpx_transport=mock)
+
+    asyncio.run(transport.get_job("kio10-job-0042"))
+    asyncio.run(transport.get_job("kio10-job-0042"))
+
+    assert len(created) == 2, "a client belongs to the loop that created it"
+
+
+def test_http_transport_rejects_use_after_aclose() -> None:
+    mock, _ = _fake_kio10_server()
+    transport = HttpKIO10("http://kio10.local", timeout=5.0, httpx_transport=mock)
+
+    async def scenario() -> None:
+        await transport.get_job("kio10-job-0042")
+        await transport.aclose()
+        await transport.aclose()
+        with pytest.raises(TransportError, match="closed"):
+            await transport.get_job("kio10-job-0042")
+
+    asyncio.run(scenario())
+
+
+def test_http_transport_aclose_without_requests_is_a_no_op() -> None:
+    transport = HttpKIO10("http://kio10.local", timeout=5.0)
+
+    asyncio.run(transport.aclose())
+
+
+class _ClosableStub(StubKIO10):
+    def __init__(self) -> None:
+        super().__init__(polls_before_done=0)
+        self.closed = False
+
+    async def aclose(self) -> None:
+        self.closed = True
+
+
+def test_run_workflow_closes_transports_it_created(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[_ClosableStub] = []
+
+    def fake_create_transport(address: str, timeout: float) -> _ClosableStub:
+        stub = _ClosableStub()
+        created.append(stub)
+        return stub
+
+    monkeypatch.setattr("kio10.dispatcher.create_transport", fake_create_transport)
+    plan = make_plan(make_step("s1"))
+
+    report = run(plan, make_settings(agents={"KIO10": "stub://"}))
+
+    assert report.results[0].status == "success"
+    assert [stub.closed for stub in created] == [True]
+
+
+def test_run_workflow_closes_every_owned_transport_even_if_one_close_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[_ClosableStub] = []
+
+    class _FailingCloseStub(_ClosableStub):
+        async def aclose(self) -> None:
+            self.closed = True
+            raise RuntimeError("pool shutdown failed")
+
+    def fake_create_transport(address: str, timeout: float) -> _ClosableStub:
+        stub = _FailingCloseStub() if not created else _ClosableStub()
+        created.append(stub)
+        return stub
+
+    monkeypatch.setattr("kio10.dispatcher.create_transport", fake_create_transport)
+    plan = make_plan(make_step("s1"), make_step("s2", agent_id="KIO10b"))
+
+    report = run(plan, make_settings(agents={"KIO10": "stub://", "KIO10b": "stub://"}))
+
+    assert [r.status for r in report.results] == ["success", "success"]
+    assert [stub.closed for stub in created] == [True, True]
+
+
+def test_run_workflow_leaves_injected_transports_open() -> None:
+    stub = _ClosableStub()
+    plan = make_plan(make_step("s1"))
+
+    run(plan, make_settings(), transports={"KIO10": stub})
+
+    assert stub.closed is False
 
 
 def test_http_transport_wraps_connection_errors() -> None:
@@ -582,6 +830,70 @@ def test_independent_steps_are_submitted_before_any_finishes() -> None:
     assert stub.events.index(("submit", "s1")) < s1_finished_index
     assert stub.events.index(("submit", "s2")) < s1_finished_index
     assert submits[-1] == ("submit", "s3")
+
+
+def test_max_parallel_steps_limits_how_many_steps_run_at_once() -> None:
+    stub = RecordingStub(polls_before_done=1)
+    plan = make_plan(make_step("s1"), make_step("s2"), make_step("s3"))
+
+    run(plan, make_settings(max_parallel_steps=1), transports={"KIO10": stub})
+
+    assert stub.events == [
+        ("submit", "s1"),
+        ("poll", "s1"),
+        ("poll", "s1"),
+        ("submit", "s2"),
+        ("poll", "s2"),
+        ("poll", "s2"),
+        ("submit", "s3"),
+        ("poll", "s3"),
+        ("poll", "s3"),
+    ]
+
+
+def test_max_parallel_steps_of_two_keeps_two_steps_in_flight() -> None:
+    stub = RecordingStub(polls_before_done=1)
+    plan = make_plan(make_step("s1"), make_step("s2"), make_step("s3"))
+
+    run(plan, make_settings(max_parallel_steps=2), transports={"KIO10": stub})
+
+    s1_done = len(stub.events) - 1 - stub.events[::-1].index(("poll", "s1"))
+    assert stub.events.index(("submit", "s2")) < s1_done
+    assert stub.events.index(("submit", "s3")) > s1_done
+
+
+def test_concurrency_limit_does_not_deadlock_dependent_steps() -> None:
+    # The dependent steps are listed first so they start before their
+    # dependency: a slot held while waiting for s1 would block s1 forever.
+    plan = make_plan(
+        make_step("s2", ("s1",)), make_step("s3", ("s2",)), make_step("s1")
+    )
+
+    async def bounded() -> DispatchReport:
+        return await asyncio.wait_for(
+            run_workflow(plan, make_settings(max_parallel_steps=1)), timeout=2
+        )
+
+    report = asyncio.run(bounded())
+
+    assert [r.status for r in report.results] == ["success", "success", "success"]
+
+
+def test_skipped_steps_do_not_consume_a_concurrency_slot() -> None:
+    stub = RecordingStub(polls_before_done=0)
+    plan = make_plan(
+        make_step("s1", agent_id="KIO7"),
+        make_step("s2", agent_id="KIO7"),
+        make_step("s3"),
+    )
+
+    results = by_id(
+        run(plan, make_settings(max_parallel_steps=1), transports={"KIO10": stub})
+    )
+
+    assert results["s1"].status == "skipped"
+    assert results["s2"].status == "skipped"
+    assert results["s3"].status == "success"
 
 
 def test_dependency_artifacts_are_passed_in_data_of_dependent_step() -> None:
@@ -696,6 +1008,9 @@ class BrokenAgent:
 
     async def get_job(self, job_id: str) -> dict[str, Any]:
         raise AssertionError("must not be called")
+
+    async def aclose(self) -> None:
+        pass
 
 
 def test_transport_error_is_reported_as_error_with_reason() -> None:

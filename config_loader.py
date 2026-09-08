@@ -14,14 +14,16 @@ _AGENT_ADDRESS_SCHEMES = ("http://", "https://", "stub://")
 class DispatchSettings:
     """Settings for dispatching plan steps to KIO agents.
 
-    Dispatch is off unless ``enabled`` is set. ``agents`` maps an agent id such
-    as ``KIO10`` to its address; agents absent from the map are treated as not
-    deployed and their steps are skipped.
+    Dispatch is off unless `enabled` is set. `agents` maps an agent id such
+    as `KIO10` to its address; agents absent from the map are treated as not
+    deployed and their steps are skipped. `max_parallel_steps` caps how many
+    steps are in flight at once, whatever the dependency graph allows.
     """
 
     enabled: bool = False
     poll_interval_seconds: float = 2.0
     step_timeout_seconds: float = 600.0
+    max_parallel_steps: int = 4
     agents: dict[str, str] = field(default_factory=dict)
 
 
@@ -96,7 +98,20 @@ def load_config(config_path: str = "config.json") -> Config:
 
 
 def _parse_dispatch(raw: Any) -> DispatchSettings:
-    """Validate the optional ``dispatch`` section of the configuration."""
+    """Validate the optional `dispatch` section of the configuration.
+
+    Args:
+        raw: The `dispatch` value from the JSON file, or None when the section
+            is absent.
+
+    Returns:
+        A `DispatchSettings` instance; the defaults when the section is absent.
+
+    Raises:
+        ValueError: If a field has the wrong type, an interval, timeout or
+            parallelism limit is not positive, or an agent address uses an
+            unsupported scheme.
+    """
     if raw is None:
         return DispatchSettings()
     if not isinstance(raw, dict):
@@ -108,23 +123,22 @@ def _parse_dispatch(raw: Any) -> DispatchSettings:
     if not isinstance(enabled, bool):
         raise ValueError("dispatch.enabled must be a boolean.")
 
-    poll_interval = raw.get("poll_interval_seconds", defaults.poll_interval_seconds)
-    if isinstance(poll_interval, bool) or not isinstance(poll_interval, (int, float)):
-        raise ValueError("dispatch.poll_interval_seconds must be a number.")
-    if poll_interval <= 0:
-        raise ValueError("dispatch.poll_interval_seconds must be positive.")
+    poll_interval = _positive_number(
+        raw, "poll_interval_seconds", defaults.poll_interval_seconds
+    )
+    step_timeout = _positive_number(
+        raw, "step_timeout_seconds", defaults.step_timeout_seconds
+    )
 
-    step_timeout = raw.get("step_timeout_seconds", defaults.step_timeout_seconds)
-    if isinstance(step_timeout, bool) or not isinstance(step_timeout, (int, float)):
-        raise ValueError("dispatch.step_timeout_seconds must be a number.")
-    if step_timeout <= 0:
-        raise ValueError("dispatch.step_timeout_seconds must be positive.")
+    max_parallel_steps = raw.get("max_parallel_steps", defaults.max_parallel_steps)
+    if type(max_parallel_steps) is not int or max_parallel_steps <= 0:
+        raise ValueError("dispatch.max_parallel_steps must be a positive integer.")
 
     agents = raw.get("agents", {})
     if not isinstance(agents, dict):
         raise ValueError("dispatch.agents must be a JSON object.")
     for agent_id, address in agents.items():
-        if not isinstance(agent_id, str) or not isinstance(address, str):
+        if not isinstance(address, str):
             raise ValueError("dispatch.agents must map agent ids to address strings.")
         if not address.startswith(_AGENT_ADDRESS_SCHEMES):
             raise ValueError(
@@ -134,7 +148,30 @@ def _parse_dispatch(raw: Any) -> DispatchSettings:
 
     return DispatchSettings(
         enabled=enabled,
-        poll_interval_seconds=float(poll_interval),
-        step_timeout_seconds=float(step_timeout),
+        poll_interval_seconds=poll_interval,
+        step_timeout_seconds=step_timeout,
+        max_parallel_steps=max_parallel_steps,
         agents=dict(agents),
     )
+
+
+def _positive_number(raw: dict[str, Any], name: str, default: float) -> float:
+    """Read a positive number from the `dispatch` section.
+
+    Args:
+        raw: The `dispatch` section.
+        name: The field to read.
+        default: The value used when the field is absent.
+
+    Returns:
+        The value as a float.
+
+    Raises:
+        ValueError: If the value is not a number or is not positive.
+    """
+    value = raw.get(name, default)
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"dispatch.{name} must be a number.")
+    if value <= 0:
+        raise ValueError(f"dispatch.{name} must be positive.")
+    return float(value)

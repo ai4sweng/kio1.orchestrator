@@ -1,19 +1,22 @@
+"""Dispatch plan steps to KIO agents in dependency order and report the results."""
+
 import asyncio
 import json
 import logging
 import time
 from collections import Counter
 from collections.abc import Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
 from config_loader import DispatchSettings
+from kio10.stub import StubKIO10
 from kio10.transport import (
+    HttpKIO10,
     KIO10Transport,
     TransportError,
     build_request,
-    create_transport,
     run_job,
 )
 from workflow_plan import Step, WorkflowPlan, parse_plan
@@ -39,18 +42,6 @@ class StepResult:
     detail: str = ""
     reply: dict[str, Any] | None = field(default=None, repr=False)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable view of the result."""
-        return {
-            "step_id": self.step_id,
-            "agent_id": self.agent_id,
-            "status": self.status,
-            "job_id": self.job_id,
-            "duration_ms": self.duration_ms,
-            "detail": self.detail,
-            "reply": self.reply,
-        }
-
 
 @dataclass
 class DispatchReport:
@@ -64,8 +55,31 @@ class DispatchReport:
         return {
             "workflow_id": self.workflow_id,
             "summary": dict(Counter(result.status for result in self.results)),
-            "steps": [result.to_dict() for result in self.results],
+            "steps": [asdict(result) for result in self.results],
         }
+
+
+def create_transport(address: str, timeout: float) -> KIO10Transport:
+    """Create a transport for an agent address.
+
+    `http://` and `https://` addresses talk to a real endpoint; `stub://`
+    selects the in-memory `StubKIO10`.
+
+    Args:
+        address: The agent address from configuration.
+        timeout: Per-request timeout in seconds for HTTP transports.
+
+    Returns:
+        A transport implementing `KIO10Transport`.
+
+    Raises:
+        ValueError: If the address scheme is not supported.
+    """
+    if address.startswith("stub://"):
+        return StubKIO10()
+    if address.startswith(("http://", "https://")):
+        return HttpKIO10(address, timeout=timeout)
+    raise ValueError(f"Unsupported agent address: {address!r}")
 
 
 async def run_workflow(
@@ -78,26 +92,71 @@ async def run_workflow(
     Each step runs as its own task. A step first awaits the tasks of the steps
     it depends on, then submits its request and polls until a final reply.
     Independent steps therefore run concurrently and dependent steps wait for
-    exactly their predecessors, whatever ``execution_mode`` says.
+    exactly their predecessors, whatever `execution_mode` says. At most
+    `settings.max_parallel_steps` steps are in flight at once.
 
     Args:
         plan: The validated workflow plan.
         settings: Dispatch settings, including the agent address registry.
-        transports: Optional pre-built transports keyed by agent id. When
-            omitted, transports are created from ``settings.agents``.
+        transports: Optional pre-built transports keyed by agent id, owned and
+            closed by the caller. When omitted, transports are created from
+            `settings.agents` and closed when the workflow finishes.
 
     Returns:
         A report with one result per plan step, in plan order.
     """
+    owned: list[KIO10Transport] = []
     if transports is None:
         transports = {
             agent_id: create_transport(address, timeout=settings.step_timeout_seconds)
             for agent_id, address in settings.agents.items()
         }
+        owned = list(transports.values())
 
+    try:
+        return await _run_steps(plan, settings, transports)
+    finally:
+        await _close_all(owned)
+
+
+async def _close_all(transports: list[KIO10Transport]) -> None:
+    """Close every transport, logging failures instead of skipping the rest.
+
+    Args:
+        transports: The transports created by `run_workflow`.
+    """
+    outcomes = await asyncio.gather(
+        *(transport.aclose() for transport in transports), return_exceptions=True
+    )
+    for transport, outcome in zip(transports, outcomes, strict=True):
+        if isinstance(outcome, BaseException):
+            logger.warning(
+                "Transport close failed: transport=%s error=%s", transport, outcome
+            )
+
+
+async def _run_steps(
+    plan: WorkflowPlan,
+    settings: DispatchSettings,
+    transports: Mapping[str, KIO10Transport],
+) -> DispatchReport:
+    """Run the plan's steps against ready transports and build the report.
+
+    Args:
+        plan: The validated workflow plan.
+        settings: Dispatch settings.
+        transports: Transports keyed by agent id; missing agents are skipped.
+
+    Returns:
+        A report with one result per plan step, in plan order.
+    """
     tasks: dict[str, asyncio.Task[StepResult]] = {}
+    # Acquired only around the agent call, never while waiting for dependencies,
+    # so a limit of 1 still lets a chain of dependent steps complete.
+    slots = asyncio.Semaphore(settings.max_parallel_steps)
 
     async def run_step(step: Step) -> StepResult:
+        """Run one step after its dependencies and return its result."""
         dependencies = [await tasks[dep_id] for dep_id in step.depends_on]
 
         blocker = next((dep for dep in dependencies if dep.status != SUCCESS), None)
@@ -121,7 +180,8 @@ async def run_workflow(
         request = build_request(
             plan.workflow_id, step, _collect_artifacts(dependencies)
         )
-        return await _execute(step, transport, request, settings)
+        async with slots:
+            return await _execute(step, transport, request, settings)
 
     for step in plan.steps:
         tasks[step.step_id] = asyncio.create_task(run_step(step))
@@ -142,48 +202,58 @@ async def _execute(
     request: dict[str, Any],
     settings: DispatchSettings,
 ) -> StepResult:
+    """Submit one step to its agent and wait for the final reply.
+
+    Args:
+        step: The plan step being dispatched.
+        transport: The agent's transport.
+        request: The request message built for the step.
+        settings: Dispatch settings providing the poll interval and step timeout.
+
+    Returns:
+        A result carrying the agent's final status, or `error` when the step
+        timed out or the transport failed.
+    """
     start = time.perf_counter()
+    reply: dict[str, Any] | None = None
     try:
         reply = await asyncio.wait_for(
             run_job(transport, request, settings.poll_interval_seconds),
             timeout=settings.step_timeout_seconds,
         )
     except asyncio.TimeoutError:
+        status = ERROR
         detail = f"timed out after {settings.step_timeout_seconds:g}s"
         logger.error("Step timed out: step_id=%s", step.step_id)
-        return StepResult(
-            step.step_id,
-            step.agent_id,
-            ERROR,
-            duration_ms=_elapsed(start),
-            detail=detail,
-        )
     except TransportError as error:
+        status = ERROR
+        detail = str(error)
         logger.error("Step transport error: step_id=%s error=%s", step.step_id, error)
-        return StepResult(
-            step.step_id,
-            step.agent_id,
-            ERROR,
-            duration_ms=_elapsed(start),
-            detail=str(error),
-        )
+    else:
+        status = reply["status"]
+        detail = _describe(reply)
 
     return StepResult(
         step.step_id,
         step.agent_id,
-        reply["status"],
-        job_id=reply.get("job_id"),
-        duration_ms=_elapsed(start),
-        detail=_describe(reply),
+        status,
+        job_id=reply.get("job_id") if reply else None,
+        duration_ms=int((time.perf_counter() - start) * 1000),
+        detail=detail,
         reply=reply,
     )
 
 
-def _elapsed(start: float) -> int:
-    return int((time.perf_counter() - start) * 1000)
-
-
 def _describe(reply: dict[str, Any]) -> str:
+    """Summarise a final reply in one line for the report.
+
+    Args:
+        reply: The agent's final reply.
+
+    Returns:
+        The artifact names for `success`, the failure class for `failure`, or the
+        reason for `needs_clarification`.
+    """
     status = reply["status"]
     if status == SUCCESS:
         names = sorted(reply.get("artifacts") or {})
@@ -195,31 +265,37 @@ def _describe(reply: dict[str, Any]) -> str:
 
 
 def _collect_artifacts(dependencies: list[StepResult]) -> dict[str, Any]:
-    """Turn the artifacts of finished dependencies into ``data`` references.
+    """Turn the artifacts of finished dependencies into `data` references.
 
-    Each artifact becomes ``{name: {uri, schema_id}}``. When two dependencies
-    produce the same artifact name, later ones are prefixed with their step id.
+    Args:
+        dependencies: Results of the steps this step depends on, all successful.
+
+    Returns:
+        A mapping `{name: {uri, schema_id}}`, one entry per artifact. When two
+        dependencies produce the same artifact name, later ones are prefixed
+        with their step id. The artifact shape was already checked by `run_job`.
     """
     data: dict[str, Any] = {}
     for dependency in dependencies:
         artifacts = (dependency.reply or {}).get("artifacts") or {}
         for name, artifact in artifacts.items():
-            receipt = artifact.get("receipt") or {}
-            uri = receipt.get("uri")
-            if not uri:
-                logger.warning(
-                    "Artifact without receipt uri ignored: step_id=%s artifact=%s",
-                    dependency.step_id,
-                    name,
-                )
-                continue
             key = name if name not in data else f"{dependency.step_id}.{name}"
-            data[key] = {"uri": uri, "schema_id": artifact.get("schema_id")}
+            data[key] = {
+                "uri": artifact["receipt"]["uri"],
+                "schema_id": artifact.get("schema_id"),
+            }
     return data
 
 
 def format_report(report: DispatchReport) -> str:
-    """Render a report as a compact table for the terminal."""
+    """Render a report as a compact table for the terminal.
+
+    Args:
+        report: The report to render.
+
+    Returns:
+        One header line, one line per step, and a summary line.
+    """
     lines = [f"Dispatch report: {report.workflow_id}"]
     for result in report.results:
         lines.append(

@@ -1,3 +1,5 @@
+"""KIO1 <-> KIO10 message contract and the transports that carry it."""
+
 import asyncio
 import json
 import logging
@@ -5,7 +7,6 @@ from typing import Any, Protocol
 
 import httpx2
 
-from kio10.stub import StubKIO10
 from workflow_plan import Step
 
 logger = logging.getLogger(__name__)
@@ -20,14 +21,33 @@ class TransportError(Exception):
 
 
 class KIO10Transport(Protocol):
-    """The two operations KIO1 needs from a KIO10 endpoint."""
+    """The operations KIO1 needs from a KIO10 endpoint."""
 
     async def submit(self, request: dict[str, Any]) -> dict[str, Any]:
-        """Send a request and return the acknowledgement."""
+        """Send a request and return the acknowledgement.
+
+        Args:
+            request: The KIO1 -> KIO10 request message.
+
+        Returns:
+            The acknowledgement with `job_id` and `status: "accepted"`.
+        """
         ...
 
     async def get_job(self, job_id: str) -> dict[str, Any]:
-        """Return the current state of a job: the acknowledgement or a final reply."""
+        """Return the current state of a job.
+
+        Args:
+            job_id: The job id from the acknowledgement.
+
+        Returns:
+            The acknowledgement while the job is running, otherwise the final
+            reply.
+        """
+        ...
+
+    async def aclose(self) -> None:
+        """Release any connection the transport holds."""
         ...
 
 
@@ -37,7 +57,7 @@ def build_request(workflow_id: str, step: Step, data: dict[str, Any]) -> dict[st
     Args:
         workflow_id: The workflow the step belongs to.
         step: The plan step being dispatched.
-        data: References to inputs, keyed by name, each with ``uri`` and ``schema_id``.
+        data: References to inputs, keyed by name, each with `uri` and `schema_id`.
 
     Returns:
         The request as a JSON-serialisable dict.
@@ -63,7 +83,7 @@ async def run_job(
         poll_interval: Seconds to wait between polls.
 
     Returns:
-        The final reply, whose ``status`` is one of `FINAL_STATUSES`.
+        The final reply, whose `status` is one of `FINAL_STATUSES`.
 
     Raises:
         TransportError: If the acknowledgement or a reply violates the contract.
@@ -84,6 +104,7 @@ async def run_job(
         _check_envelope(reply, request)
         status = reply.get("status")
         if status in FINAL_STATUSES:
+            _check_final_body(reply)
             logger.info("Job finished: job_id=%s status=%s", job_id, status)
             return reply
         if status != ACCEPTED:
@@ -92,6 +113,22 @@ async def run_job(
 
 
 def _check_envelope(message: dict[str, Any], request: dict[str, Any]) -> None:
+    """Ensure a reply belongs to the request it answers and speaks our schema.
+
+    Args:
+        message: An acknowledgement or a reply from the agent.
+        request: The request that was sent.
+
+    Raises:
+        TransportError: If `schema_version` is not the version KIO1 speaks, or
+            `workflow_id` or `step_id` differ from the request.
+    """
+    schema_version = message.get("schema_version")
+    if schema_version != SCHEMA_VERSION:
+        raise TransportError(
+            f"Reply schema_version {schema_version!r} is not supported; "
+            f"expected {SCHEMA_VERSION!r}"
+        )
     for key in ("workflow_id", "step_id"):
         if message.get(key) != request[key]:
             raise TransportError(
@@ -99,8 +136,49 @@ def _check_envelope(message: dict[str, Any], request: dict[str, Any]) -> None:
             )
 
 
+def _check_final_body(reply: dict[str, Any]) -> None:
+    """Ensure the parts of a final reply that KIO1 reads have the documented shape.
+
+    Only what the dispatcher consumes is checked: `artifacts` (a mapping of
+    name to an object with `receipt.uri`), `clarification` (an object) and
+    `failure_class` (a string). Anything else in the body is passed through.
+
+    Args:
+        reply: A reply whose `status` is one of `FINAL_STATUSES`.
+
+    Raises:
+        TransportError: If one of those parts is present but malformed.
+    """
+    artifacts = reply.get("artifacts")
+    if artifacts is not None:
+        if not isinstance(artifacts, dict):
+            raise TransportError("Reply is malformed: artifacts must be an object")
+        for name, artifact in artifacts.items():
+            receipt = artifact.get("receipt") if isinstance(artifact, dict) else None
+            if not isinstance(receipt, dict) or not isinstance(receipt.get("uri"), str):
+                raise TransportError(
+                    f"Reply is malformed: artifact {name!r} needs a receipt with a "
+                    "string uri"
+                )
+
+    clarification = reply.get("clarification")
+    if clarification is not None and not isinstance(clarification, dict):
+        raise TransportError("Reply is malformed: clarification must be an object")
+
+    failure_class = reply.get("failure_class")
+    if failure_class is not None and not isinstance(failure_class, str):
+        raise TransportError("Reply is malformed: failure_class must be a string")
+
+
 class HttpKIO10:
-    """KIO10 transport over HTTP: ``POST /jobs`` and ``GET /jobs/{job_id}``."""
+    """KIO10 transport over HTTP: `POST /jobs` and `GET /jobs/{job_id}`.
+
+    One `httpx2.AsyncClient` is opened on the first request and reused by every
+    later request, so polling keeps its connection instead of reconnecting. A
+    client belongs to the event loop that opened it; a request from another
+    loop opens a fresh client. Call `aclose` when the transport is no longer
+    needed; after that the transport refuses further requests.
+    """
 
     def __init__(
         self,
@@ -108,27 +186,72 @@ class HttpKIO10:
         timeout: float,
         httpx_transport: httpx2.AsyncBaseTransport | None = None,
     ) -> None:
+        """Create an HTTP transport for one agent.
+
+        Args:
+            base_url: The agent's base URL, for example `http://localhost:8010`.
+            timeout: Per-request timeout in seconds.
+            httpx_transport: Optional `httpx2` transport, used by tests to serve
+                responses from memory.
+        """
         self._base_url = base_url.rstrip("/")
         self._timeout = timeout
         self._httpx_transport = httpx_transport
+        self._client: httpx2.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+        self._closed = False
 
     async def submit(self, request: dict[str, Any]) -> dict[str, Any]:
-        """POST the request to ``/jobs`` and return the acknowledgement."""
+        """POST the request to `/jobs` and return the acknowledgement.
+
+        Args:
+            request: The KIO1 -> KIO10 request message.
+
+        Returns:
+            The acknowledgement as returned by the agent.
+
+        Raises:
+            TransportError: If the agent cannot be reached or returns an error
+                or a non-JSON body.
+        """
         return await self._call("POST", "/jobs", request)
 
     async def get_job(self, job_id: str) -> dict[str, Any]:
-        """GET ``/jobs/{job_id}`` and return the current reply."""
+        """GET `/jobs/{job_id}` and return the current reply.
+
+        Args:
+            job_id: The job id from the acknowledgement.
+
+        Returns:
+            The acknowledgement while the job is running, otherwise the final
+        reply.
+
+        Raises:
+            TransportError: If the agent cannot be reached or returns an error
+                or a non-JSON body.
+        """
         return await self._call("GET", f"/jobs/{job_id}")
 
     async def _call(
         self, method: str, path: str, body: dict[str, Any] | None = None
     ) -> dict[str, Any]:
+        """Perform one HTTP request against the agent.
+
+        Args:
+            method: The HTTP method.
+            path: The path appended to the base URL.
+            body: Optional JSON body.
+
+        Returns:
+            The parsed JSON object from the response.
+
+        Raises:
+            TransportError: On connection failure, an HTTP status of 400 or above,
+                a non-JSON body, or a JSON body that is not an object.
+        """
         url = f"{self._base_url}{path}"
         try:
-            async with httpx2.AsyncClient(
-                timeout=self._timeout, transport=self._httpx_transport
-            ) as client:
-                response = await client.request(method, url, json=body)
+            response = await self._get_client().request(method, url, json=body)
         except httpx2.HTTPError as error:
             raise TransportError(f"{method} {url} failed: {error}") from error
 
@@ -142,25 +265,31 @@ class HttpKIO10:
             raise TransportError(f"{method} {url} returned non-object JSON")
         return parsed
 
+    def _get_client(self) -> httpx2.AsyncClient:
+        """Return the client for the running event loop, opening one if needed.
 
-def create_transport(address: str, timeout: float) -> KIO10Transport:
-    """Create a transport for an agent address.
+        A client opened under a loop that has since been closed cannot be
+        closed any more; it is dropped and replaced.
 
-    ``http://`` and ``https://`` addresses talk to a real endpoint;
-    ``stub://`` selects the in-memory `StubKIO10`.
+        Returns:
+            The `httpx2.AsyncClient` shared by every request on this loop.
 
-    Args:
-        address: The agent address from configuration.
-        timeout: Per-request timeout in seconds for HTTP transports.
+        Raises:
+            TransportError: If the transport has been closed.
+        """
+        if self._closed:
+            raise TransportError("Transport is closed")
+        loop = asyncio.get_running_loop()
+        if self._client is None or self._loop is not loop:
+            self._client = httpx2.AsyncClient(
+                timeout=self._timeout, transport=self._httpx_transport
+            )
+            self._loop = loop
+        return self._client
 
-    Returns:
-        A transport implementing `KIO10Transport`.
-
-    Raises:
-        ValueError: If the address scheme is not supported.
-    """
-    if address.startswith("stub://"):
-        return StubKIO10()
-    if address.startswith(("http://", "https://")):
-        return HttpKIO10(address, timeout=timeout)
-    raise ValueError(f"Unsupported agent address: {address!r}")
+    async def aclose(self) -> None:
+        """Close the shared client and refuse further requests. Idempotent."""
+        self._closed = True
+        client, self._client = self._client, None
+        if client is not None:
+            await client.aclose()

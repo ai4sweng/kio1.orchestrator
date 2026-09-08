@@ -1,12 +1,16 @@
+"""Parse and validate workflow plans produced by the KIO1 planner model."""
+
 import logging
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, replace
 from itertools import pairwise
 from typing import Any
 
 logger = logging.getLogger(__name__)
 
 EXECUTION_MODES = frozenset({"sequential", "parallel", "mixed"})
-_REQUIRED_STEP_FIELDS = ("step_id", "agent_id", "capability", "task")
+
+_SAFE_IDENTIFIER = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 @dataclass(frozen=True)
@@ -33,10 +37,10 @@ class WorkflowPlan:
 def parse_plan(data: dict[str, Any]) -> WorkflowPlan:
     """Parse and validate a raw workflow plan produced by the planner model.
 
-    When no step declares ``depends_on``, dependencies are derived from
-    ``execution_mode``: ``sequential`` chains the steps in order, ``parallel``
-    leaves them independent, and ``mixed`` falls back to a chain with a warning
-    because the plan gave no information about which steps may run together.
+    When no step declares `depends_on`, dependencies are derived from
+    `execution_mode`: `sequential` chains the steps in order, `parallel`
+    leaves them independent, and `mixed` falls back to a chain, noted in the
+    log, because the plan gave no information about which steps may run together.
 
     Args:
         data: The plan as a JSON object.
@@ -45,24 +49,29 @@ def parse_plan(data: dict[str, Any]) -> WorkflowPlan:
         A `WorkflowPlan` with explicit dependencies on every step.
 
     Raises:
-        ValueError: If a required field is missing, ``execution_mode`` is
-            unknown, a step id is duplicated, a dependency names an unknown
-            step, or the dependencies form a cycle.
+        ValueError: If a required field is missing or has the wrong type,
+            `workflow_id`, `step_id` or `agent_id` contain characters unsafe
+            for file names and uris, `execution_mode` is unknown, a step id is
+            duplicated, a dependency names an unknown step, or the
+            dependencies form a cycle.
     """
-    for field_name in ("workflow_id", "execution_mode", "steps"):
-        if field_name not in data:
-            raise ValueError(f"Plan is missing required field: {field_name!r}")
+    workflow_id = _require_identifier(data.get("workflow_id"), "workflow_id", "Plan")
+    explanation = data.get("explanation", "")
+    if not isinstance(explanation, str):
+        raise ValueError("Plan field 'explanation' must be a string")
 
-    execution_mode = data["execution_mode"]
+    execution_mode = data.get("execution_mode")
     if execution_mode not in EXECUTION_MODES:
         raise ValueError(f"Unknown execution_mode: {execution_mode!r}")
 
-    raw_steps = data["steps"]
+    raw_steps = data.get("steps")
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("Plan must contain a non-empty list of steps")
+    for index, raw_step in enumerate(raw_steps):
+        if not isinstance(raw_step, dict):
+            raise ValueError(f"Plan steps[{index}] must be a JSON object")
 
     steps = tuple(_parse_step(raw) for raw in raw_steps)
-    _reject_duplicate_ids(steps)
 
     if not any("depends_on" in raw for raw in raw_steps):
         steps = _derive_dependencies(steps, execution_mode)
@@ -70,71 +79,141 @@ def parse_plan(data: dict[str, Any]) -> WorkflowPlan:
     _validate_graph(steps)
 
     return WorkflowPlan(
-        workflow_id=data["workflow_id"],
+        workflow_id=workflow_id,
         execution_mode=execution_mode,
         steps=steps,
-        explanation=data.get("explanation", ""),
+        explanation=explanation,
     )
 
 
+def _require_identifier(value: Any, field_name: str, context: str) -> str:
+    """Return `value` if it is a string safe to use in file names and uris.
+
+    Args:
+        value: The raw field value from the plan.
+        field_name: The field being checked, for the error message.
+        context: What holds the field, for the error message.
+
+    Returns:
+        The validated identifier.
+
+    Raises:
+        ValueError: If the value is not a string or contains characters other
+            than letters, digits, `.`, `_` and `-`, or is `.` or `..`.
+    """
+    if (
+        not isinstance(value, str)
+        or not _SAFE_IDENTIFIER.fullmatch(value)
+        or value in {".", ".."}
+    ):
+        raise ValueError(
+            f"{context} field {field_name!r} must be a non-empty string of letters, "
+            f"digits, '.', '_' or '-', got {value!r}"
+        )
+    return value
+
+
+def _require_text(value: Any, field_name: str, context: str) -> str:
+    """Return `value` if it is a non-blank string.
+
+    Args:
+        value: The raw field value from the plan.
+        field_name: The field being checked, for the error message.
+        context: What holds the field, for the error message.
+
+    Returns:
+        The validated text.
+
+    Raises:
+        ValueError: If the value is not a string or is blank.
+    """
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError(
+            f"{context} field {field_name!r} must be a non-empty string, got {value!r}"
+        )
+    return value
+
+
 def _parse_step(raw: dict[str, Any]) -> Step:
-    for field_name in _REQUIRED_STEP_FIELDS:
-        if field_name not in raw:
-            raise ValueError(f"Step is missing required field: {field_name!r}")
+    """Build a `Step` from one raw entry of the plan's `steps` list.
+
+    Args:
+        raw: The step as a JSON object.
+
+    Returns:
+        The step, with `depends_on` as declared or empty when absent.
+
+    Raises:
+        ValueError: If a required field is missing or invalid, or `depends_on`
+            is not a list of step ids.
+    """
+    step_id = _require_identifier(raw.get("step_id"), "step_id", "Step")
+    context = f"Step {step_id!r}"
+    agent_id = _require_identifier(raw.get("agent_id"), "agent_id", context)
+    capability = _require_text(raw.get("capability"), "capability", context)
+    task = _require_text(raw.get("task"), "task", context)
 
     depends_on = raw.get("depends_on", [])
     if not isinstance(depends_on, list) or not all(
         isinstance(dep, str) for dep in depends_on
     ):
-        raise ValueError(
-            f"Step {raw['step_id']!r}: depends_on must be a list of step ids"
-        )
+        raise ValueError(f"{context}: depends_on must be a list of step ids")
 
     return Step(
-        step_id=raw["step_id"],
-        agent_id=raw["agent_id"],
-        capability=raw["capability"],
-        task=raw["task"],
+        step_id=step_id,
+        agent_id=agent_id,
+        capability=capability,
+        task=task,
         depends_on=tuple(depends_on),
     )
-
-
-def _reject_duplicate_ids(steps: tuple[Step, ...]) -> None:
-    seen: set[str] = set()
-    for step in steps:
-        if step.step_id in seen:
-            raise ValueError(f"Plan contains duplicate step_id: {step.step_id!r}")
-        seen.add(step.step_id)
 
 
 def _derive_dependencies(
     steps: tuple[Step, ...], execution_mode: str
 ) -> tuple[Step, ...]:
+    """Fill in `depends_on` from `execution_mode` when the plan declared none.
+
+    Args:
+        steps: The parsed steps, all with empty `depends_on`.
+        execution_mode: One of `sequential`, `parallel` or `mixed`.
+
+    Returns:
+        The steps unchanged for `parallel`; otherwise each step depends on the
+        previous one. `mixed` is noted in the log because the plan gave no
+        information about which steps may run together.
+    """
     if execution_mode == "parallel":
         return steps
 
     if execution_mode == "mixed":
-        logger.warning(
+        logger.info(
             "Plan uses execution_mode 'mixed' without depends_on; "
             "falling back to sequential execution"
         )
 
     chained = [steps[0]]
-    for previous, step in pairwise(steps):
-        chained.append(
-            Step(
-                step_id=step.step_id,
-                agent_id=step.agent_id,
-                capability=step.capability,
-                task=step.task,
-                depends_on=(previous.step_id,),
-            )
-        )
+    chained.extend(
+        replace(step, depends_on=(previous.step_id,))
+        for previous, step in pairwise(steps)
+    )
     return tuple(chained)
 
 
 def _validate_graph(steps: tuple[Step, ...]) -> None:
-    dependencies = {step.step_id: step.depends_on for step in steps}
+    """Check that step ids are unique, dependencies are known and there is no cycle.
+
+    Args:
+        steps: The steps with explicit `depends_on`.
+
+    Raises:
+        ValueError: If a step id is duplicated, a dependency names an unknown
+            step, or the graph has a cycle.
+    """
+    dependencies: dict[str, tuple[str, ...]] = {}
+    for step in steps:
+        if step.step_id in dependencies:
+            raise ValueError(f"Plan contains duplicate step_id: {step.step_id!r}")
+        dependencies[step.step_id] = step.depends_on
 
     for step_id, deps in dependencies.items():
         for dep in deps:
@@ -146,6 +225,7 @@ def _validate_graph(steps: tuple[Step, ...]) -> None:
     done: set[str] = set()
 
     def visit(step_id: str) -> None:
+        """Visit `step_id` depth-first, raising when a step is already on the path."""
         if step_id in done:
             return
         if step_id in on_path:

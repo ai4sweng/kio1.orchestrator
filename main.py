@@ -83,9 +83,9 @@ def main() -> None:
                 print(f"\n{formatted}")
 
                 if config.dispatch.enabled:
-                    print(
-                        f"\n{dispatch_plan(formatted, config.dispatch, 'logs', session_id)}"
-                    )
+                    settings = config.dispatch
+                    report = dispatch_plan(formatted, settings, "logs", session_id)
+                    print(f"\n{report}")
 
             except Exception as e:
                 logger.exception("Request failed: turn=%d", turn)
