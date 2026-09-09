@@ -32,13 +32,14 @@ workflow_plan --> Step, WorkflowPlan (dataclasses)
 kio10.transport --> KIO10Transport (Protocol), TransportError
                 --> build_request(workflow_id, step, data)
                 --> run_job(transport, request, poll_interval)
-                --> HttpKIO10, create_transport(address, timeout)
+                --> HttpKIO10
 
 kio10.stub    --> StubKIO10
 
 kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
+                 --> create_transport(address, timeout)
                  --> run_workflow(plan, settings, transports=None)
-                 --> format_report(), write_report(), dispatch_plan()
+                 --> format_report(), write_report(), dispatch_plan(plan, ...)
 ```
 
 ## `config_loader`
@@ -57,6 +58,7 @@ kio10.dispatcher --> StepResult, DispatchReport (dataclasses)
 | `keep_alive` | `int` | Ollama residency control (`-1` keeps loaded) |
 | `max_output_tokens` | `int` | Maximum generated output tokens |
 | `provider_options` | `dict[str, Any]` | Provider-specific configuration |
+| `dispatch` | `DispatchSettings` | Dispatch settings: `enabled`, `poll_interval_seconds`, `step_timeout_seconds`, `max_parallel_steps`, `agents` (see [Dispatch](dispatch.md)) |
 
 ### `load_config(config_path="config.json") -> Config`
 
@@ -163,7 +165,7 @@ Parses and pretty-prints a JSON string with 2-space indentation. Falls back to `
 
 ### `parse_plan(data) -> WorkflowPlan`
 
-Validates a raw plan dict. Derives `depends_on` from `execution_mode` when no step declares it. Raises `ValueError` on missing fields, unknown `execution_mode`, duplicate step ids, unknown dependencies or cycles.
+Validates a raw plan dict. Derives `depends_on` from `execution_mode` when no step declares it. Raises `ValueError` on missing fields or wrong types, `workflow_id` / `step_id` / `agent_id` outside `[A-Za-z0-9._-]` (they end up in file names and `shm://` uris), blank `capability` or `task`, unknown `execution_mode`, duplicate step ids, unknown dependencies or cycles.
 
 ## `kio10.transport`
 
@@ -173,15 +175,11 @@ Builds the KIO1 → KIO10 request message from the integration document.
 
 ### `run_job(transport, request, poll_interval) -> dict`
 
-Submits the request, checks the acknowledgement, then polls `get_job` until the status is `success`, `needs_clarification` or `failure`. Raises `TransportError` when a reply violates the contract.
+Submits the request, checks the acknowledgement, then polls `get_job` until the status is `success`, `needs_clarification` or `failure`. Raises `TransportError` when a reply violates the contract: wrong `schema_version`, a different `workflow_id` / `step_id`, a poll reply for a different `job_id`, an acknowledgement whose `job_id` is missing or not a plain identifier, an unknown status, or a malformed `artifacts`, `clarification` or `failure_class`.
 
 ### `HttpKIO10(base_url, timeout, httpx_transport=None)`
 
-Transport over `POST /jobs` and `GET /jobs/{job_id}` using `httpx2.AsyncClient`. Connection errors, HTTP error statuses and non-JSON bodies become `TransportError`.
-
-### `create_transport(address, timeout) -> KIO10Transport`
-
-Returns `HttpKIO10` for `http://`/`https://` addresses and `StubKIO10` for `stub://`.
+Transport over `POST /jobs` and `GET /jobs/{job_id}`. One `httpx2.AsyncClient` is opened lazily and reused for every request; the transport is bound to the event loop that opened it and refuses requests from another loop. `aclose()` releases the client and the transport refuses further requests. Connection errors, HTTP error statuses and non-JSON bodies become `TransportError`.
 
 ## `kio10.stub`
 
@@ -191,14 +189,18 @@ In-memory KIO10. `submit` is idempotent per `(workflow_id, step_id)`; `get_job` 
 
 ## `kio10.dispatcher`
 
+### `create_transport(address, timeout) -> KIO10Transport`
+
+Returns `HttpKIO10` for `http://`/`https://` addresses and `StubKIO10` for `stub://`.
+
 ### `run_workflow(plan, settings, transports=None) -> DispatchReport`
 
-Coroutine. Runs every step as an `asyncio` task; a step awaits its dependencies, is skipped when its agent is not in `transports`/`settings.agents` or a dependency did not succeed, and otherwise submits and polls with `settings.step_timeout_seconds` as the limit.
+Coroutine. Runs every step as an `asyncio` task; a step awaits its dependencies, is skipped when its agent is not in `transports`/`settings.agents` or a dependency did not succeed, and otherwise submits and polls with `settings.step_timeout_seconds` as the limit. At most `settings.max_parallel_steps` steps are at their agents at once. Transports created from `settings.agents` are closed when the workflow finishes; transports passed in `transports` stay open and belong to the caller.
 
 ### `format_report(report) -> str`, `write_report(report, log_directory, session_id) -> Path`
 
 Terminal table and JSON file `dispatch_<session_id>_<workflow_id>.json`.
 
-### `dispatch_plan(plan_json, settings, log_directory, session_id) -> str`
+### `dispatch_plan(plan, settings, log_directory, session_id) -> str`
 
-Convenience entry point used by `main.py`: parse, run, store, and return the terminal summary.
+Convenience entry point used by `main.py`: run a parsed `WorkflowPlan`, store the report, and return the terminal summary.

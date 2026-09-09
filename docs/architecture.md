@@ -59,7 +59,8 @@ graph TD
 3. A new JSONL chat file is created for the session.
 4. The REPL loop reads user input, loads prior messages from the chat file, sends the full conversation to Ollama, and displays the formatted JSON workflow plan.
 5. Both user and assistant messages are appended to the chat file after each exchange.
-6. When `dispatch.enabled` is set, the plan is parsed, each step is sent to its agent in dependency order, and a per-step report is printed and stored as `logs/dispatch_<session_id>_<workflow_id>.json`. See [Dispatch](dispatch.md).
+6. The plan is validated by `workflow_plan.py` and a one-line `Plan check` verdict is printed under it. The model's JSON is printed unchanged so that it stays comparable with the `kio1.evals` results.
+7. When `dispatch.enabled` is set and the check passed, each step is sent to its agent in dependency order, and a per-step report is printed and stored as `logs/dispatch_<session_id>_<workflow_id>.json`. See [Dispatch](dispatch.md).
 
 ## Design Decisions
 
@@ -69,7 +70,7 @@ graph TD
 - **JSON-forced output**: The Ollama request includes `"format": "json"` to guarantee structured responses from the model.
 - **Per-session logging**: Each run writes `logs/log_<session_id>.log` at `DEBUG`, paired with its `chats/chat_<session_id>.jsonl` by a shared id. Only `ERROR` reaches the console, keeping interactive output clean.
 - **Dispatch off by default**: the terminal application is unchanged unless `dispatch.enabled` is set. Steps addressed to agents absent from `dispatch.agents` are reported as skipped, not as errors.
-- **Dependencies drive concurrency**: each step is an `asyncio` task that awaits the tasks it depends on, so independent steps run together and `execution_mode: "mixed"` needs no special handling.
+- **Dependencies drive concurrency**: each step is an `asyncio` task that awaits the tasks it depends on, so independent steps run together whenever a plan carries `depends_on`. Until the system prompt is taught to emit it, plans run by `execution_mode` alone and `mixed` falls back to `sequential`.
 - **Only the KIO10 contract is fixed**: the dispatcher requires nothing beyond the envelope of the KIO1 – KIO10 integration document. Polling reuses the acknowledgement while a job runs, so no new status was introduced.
 - **Message content at DEBUG only**: `INFO` records carry metadata (provider, model, durations, token counts); user queries and model responses appear only at `DEBUG`, which never reaches stderr.
 

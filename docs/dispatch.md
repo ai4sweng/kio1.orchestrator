@@ -5,7 +5,8 @@ responsible KIO agent, matches the replies back to their steps and reports what
 succeeded, what failed, what was skipped and how long each step took.
 
 Dispatch is **off by default**. With `dispatch.enabled: false` the terminal
-application behaves exactly as before: it prints the plan and nothing else.
+application prints the plan and a one-line `Plan check` verdict, and sends
+nothing anywhere.
 
 ## Enabling
 
@@ -14,6 +15,7 @@ application behaves exactly as before: it prints the plan and nothing else.
     "enabled": true,
     "poll_interval_seconds": 2,
     "step_timeout_seconds": 600,
+    "max_parallel_steps": 4,
     "agents": {
         "KIO10": "stub://"
     }
@@ -25,6 +27,7 @@ application behaves exactly as before: it prints the plan and nothing else.
 | `enabled` | Run the plan after printing it |
 | `poll_interval_seconds` | Pause between polls of a running job |
 | `step_timeout_seconds` | Maximum time for one step, from submission to final reply |
+| `max_parallel_steps` | How many steps may be in flight at once; the dependency graph decides which steps are ready, this caps how many of them actually run |
 | `agents` | Agent id to address. `http://` or `https://` talks to a real endpoint, `stub://` uses the in-memory stub |
 
 Agents missing from `agents` are treated as **not deployed**: their steps are
@@ -42,11 +45,21 @@ A step may declare the steps whose results it needs:
 The dispatcher runs each step as its own `asyncio` task. A task waits for the
 tasks it depends on, then submits its request. Independent steps therefore run
 together and dependent steps wait for exactly their predecessors. This is what
-makes `execution_mode: "mixed"` meaningful.
+gives `execution_mode: "mixed"` a meaning once plans carry `depends_on`.
+`max_parallel_steps` caps how many
+ready steps are submitted at once; the cap applies only while a step is at the
+agent, so a chain of dependent steps completes even with a limit of 1.
 
 When no step declares `depends_on`, dependencies are derived from
 `execution_mode`: `sequential` chains the steps in order, `parallel` leaves them
-independent, and `mixed` falls back to a chain with a warning in the log.
+independent, and `mixed` falls back to a chain, which is noted in the log.
+
+**The current system prompt does not ask the model for `depends_on`.** Plans
+produced today therefore run by `execution_mode` alone, and `mixed` behaves as
+`sequential`. Teaching the prompt to emit `depends_on` is a separate change
+that has to be measured with
+[kio1.evals](https://github.com/ai4sweng/kio1.evals) before it lands; the
+dispatcher already accepts the field, so no code change is needed then.
 
 Plans with an unknown dependency, a duplicate `step_id` or a dependency cycle
 are rejected before anything is sent.
@@ -80,9 +93,12 @@ One rule is added so that KIO1 can poll: **while a job is still running,
 `GET /jobs/{job_id}` returns the acknowledgement** (`status: "accepted"`).
 No new status or field is introduced.
 
-Replies are matched to their step by `workflow_id` and `step_id`. A reply that
-names a different step, an acknowledgement without `job_id`, or an unknown
-status is treated as a transport error.
+Replies are matched to their step by `workflow_id` and `step_id`, and poll
+replies to their job by `job_id`. A reply whose `schema_version` is not `1.0`,
+that names a different step or a different job, an acknowledgement whose
+`job_id` is missing or is not a plain identifier (letters, digits, `.`, `_`,
+`:`, `-`), or an unknown status is treated as a transport error. The `job_id`
+is also URL-encoded as a single path segment when polling.
 
 The reply format for the other agents (KIO2 – KIO13) is not yet agreed. Until
 it is, those agents are not deployed and their steps are skipped; the

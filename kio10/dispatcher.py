@@ -19,7 +19,7 @@ from kio10.transport import (
     build_request,
     run_job,
 )
-from workflow_plan import Step, WorkflowPlan, parse_plan
+from workflow_plan import Step, WorkflowPlan
 
 logger = logging.getLogger(__name__)
 
@@ -330,23 +330,22 @@ def write_report(report: DispatchReport, log_directory: str, session_id: str) ->
 
 
 def dispatch_plan(
-    plan_json: str, settings: DispatchSettings, log_directory: str, session_id: str
+    plan: WorkflowPlan,
+    settings: DispatchSettings,
+    log_directory: str,
+    session_id: str,
 ) -> str:
-    """Parse a plan, dispatch it, store the report and return a terminal summary.
+    """Dispatch a plan, store the report and return a terminal summary.
 
     Args:
-        plan_json: The plan as produced by the planner model.
+        plan: The validated workflow plan.
         settings: Dispatch settings.
         log_directory: Directory holding session logs.
         session_id: The current session id.
 
     Returns:
         The formatted report followed by the report file path.
-
-    Raises:
-        ValueError: If the plan is not valid.
     """
-    plan = parse_plan(json.loads(plan_json))
     report = asyncio.run(run_workflow(plan, settings))
     path = write_report(report, log_directory, session_id)
     return f"{format_report(report)}\nReport saved to {path}"

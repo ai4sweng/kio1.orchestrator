@@ -549,6 +549,68 @@ def test_success_reply_without_artifacts_field_is_accepted() -> None:
     assert results["s2"].status == "success"
 
 
+def test_run_job_rejects_poll_reply_for_a_different_job() -> None:
+    agent = _MisbehavingAgent(
+        _ack(job_id="kio10-job-0042"),
+        _ack(status="success", job_id="kio10-job-0017"),
+    )
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="kio10-job-0017"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+def test_run_job_rejects_poll_reply_without_job_id() -> None:
+    reply = _ack(status="success")
+    del reply["job_id"]
+    agent = _MisbehavingAgent(_ack(), reply)
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="job_id"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+@pytest.mark.parametrize(
+    "job_id", ["../admin", "jobs/0042", "0042?status=success", "job 42", "job\n42"]
+)
+def test_run_job_rejects_job_id_that_is_not_a_plain_identifier(job_id: str) -> None:
+    agent = _MisbehavingAgent(
+        _ack(job_id=job_id), _ack(status="success", job_id=job_id)
+    )
+    request = build_request("wf-test01", make_step(), {})
+
+    with pytest.raises(TransportError, match="job_id"):
+        asyncio.run(run_job(agent, request, poll_interval=0))
+
+
+def test_run_job_accepts_job_ids_with_letters_digits_and_separators() -> None:
+    job_id = "kio10-job_0042.v1:a"
+    agent = _MisbehavingAgent(
+        _ack(job_id=job_id), _ack(status="success", job_id=job_id)
+    )
+    request = build_request("wf-test01", make_step(), {})
+
+    reply = asyncio.run(run_job(agent, request, poll_interval=0))
+
+    assert reply["job_id"] == job_id
+
+
+def test_http_transport_encodes_job_id_as_a_single_path_segment() -> None:
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        return httpx2.Response(200, json={})
+
+    transport = HttpKIO10(
+        "http://kio10.local", timeout=5.0, httpx_transport=httpx2.MockTransport(handler)
+    )
+
+    asyncio.run(transport.get_job("../admin?x=1 y"))
+
+    assert str(seen[0].url) == "http://kio10.local/jobs/..%2Fadmin%3Fx%3D1%20y"
+
+
 def test_run_job_rejects_unknown_final_status() -> None:
     agent = _MisbehavingAgent(_ack(), _ack(status="done"))
     request = build_request("wf-test01", make_step(), {})
@@ -653,7 +715,7 @@ def test_http_transport_reuses_one_client_across_requests(
     assert len(created) == 1, "submit and every poll must share one AsyncClient"
 
 
-def test_http_transport_opens_a_new_client_when_used_from_another_event_loop(
+def test_http_transport_refuses_use_from_another_event_loop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     created = _count_async_clients(monkeypatch)
@@ -661,9 +723,21 @@ def test_http_transport_opens_a_new_client_when_used_from_another_event_loop(
     transport = HttpKIO10("http://kio10.local", timeout=5.0, httpx_transport=mock)
 
     asyncio.run(transport.get_job("kio10-job-0042"))
-    asyncio.run(transport.get_job("kio10-job-0042"))
+    with pytest.raises(TransportError, match="event loop"):
+        asyncio.run(transport.get_job("kio10-job-0042"))
 
-    assert len(created) == 2, "a client belongs to the loop that created it"
+    assert len(created) == 1, "no second client may be opened for another loop"
+
+
+def test_http_transport_can_be_closed_from_another_event_loop() -> None:
+    mock, _ = _fake_kio10_server()
+    transport = HttpKIO10("http://kio10.local", timeout=5.0, httpx_transport=mock)
+
+    asyncio.run(transport.get_job("kio10-job-0042"))
+    asyncio.run(transport.aclose())
+
+    with pytest.raises(TransportError, match="closed"):
+        asyncio.run(transport.get_job("kio10-job-0042"))
 
 
 def test_http_transport_rejects_use_after_aclose() -> None:
@@ -1094,38 +1168,12 @@ def test_format_report_lists_each_step_with_status_and_duration() -> None:
     assert "wf-test01" in text
 
 
-def test_dispatch_plan_runs_plan_json_writes_report_and_returns_summary(
+def test_dispatch_plan_runs_plan_writes_report_and_returns_summary(
     tmp_path: Path,
 ) -> None:
-    plan_json = json.dumps(
-        {
-            "workflow_id": "wf-e2e01",
-            "execution_mode": "mixed",
-            "steps": [
-                {
-                    "step_id": "s1",
-                    "agent_id": "KIO10",
-                    "capability": "tinyml",
-                    "task": "a",
-                },
-                {
-                    "step_id": "s2",
-                    "agent_id": "KIO8",
-                    "capability": "deployment",
-                    "task": "b",
-                    "depends_on": ["s1"],
-                },
-            ],
-            "explanation": "e2e",
-        }
-    )
+    plan = make_plan(make_step("s1"), make_step("s2", ("s1",), agent_id="KIO8"))
 
-    text = dispatch_plan(plan_json, make_settings(), str(tmp_path), "sess01")
+    text = dispatch_plan(plan, make_settings(), str(tmp_path), "sess01")
 
     assert "success" in text and "skipped" in text
-    assert (tmp_path / "dispatch_sess01_wf-e2e01.json").exists()
-
-
-def test_dispatch_plan_rejects_invalid_plan() -> None:
-    with pytest.raises(ValueError):
-        dispatch_plan('{"workflow_id": "wf"}', make_settings(), "logs", "sess")
+    assert (tmp_path / "dispatch_sess01_wf-test01.json").exists()

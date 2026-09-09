@@ -3,7 +3,9 @@
 import asyncio
 import json
 import logging
+import re
 from typing import Any, Protocol
+from urllib.parse import quote
 
 import httpx2
 
@@ -14,6 +16,10 @@ logger = logging.getLogger(__name__)
 SCHEMA_VERSION = "1.0"
 FINAL_STATUSES = frozenset({"success", "needs_clarification", "failure"})
 ACCEPTED = "accepted"
+
+# A job id is placed into a URL path, so only plain identifier characters are
+# accepted: no path separators, query characters or whitespace.
+_JOB_ID = re.compile(r"^[A-Za-z0-9._:-]+$")
 
 
 class TransportError(Exception):
@@ -86,7 +92,8 @@ async def run_job(
         The final reply, whose `status` is one of `FINAL_STATUSES`.
 
     Raises:
-        TransportError: If the acknowledgement or a reply violates the contract.
+        TransportError: If the acknowledgement or a reply violates the contract,
+            including a poll reply that belongs to a different job.
     """
     ack = await transport.submit(request)
     _check_envelope(ack, request)
@@ -95,13 +102,20 @@ async def run_job(
             f"Expected acknowledgement status {ACCEPTED!r}, got {ack.get('status')!r}"
         )
     job_id = ack.get("job_id")
-    if not isinstance(job_id, str) or not job_id:
-        raise TransportError("Acknowledgement is missing job_id")
+    if not isinstance(job_id, str) or not _JOB_ID.fullmatch(job_id):
+        raise TransportError(
+            f"Acknowledgement job_id {job_id!r} is missing or not a plain identifier"
+        )
     logger.info("Job accepted: step_id=%s job_id=%s", request["step_id"], job_id)
 
     while True:
         reply = await transport.get_job(job_id)
         _check_envelope(reply, request)
+        if reply.get("job_id") != job_id:
+            raise TransportError(
+                f"Reply job_id {reply.get('job_id')!r} does not match "
+                f"acknowledged job {job_id!r}"
+            )
         status = reply.get("status")
         if status in FINAL_STATUSES:
             _check_final_body(reply)
@@ -174,10 +188,10 @@ class HttpKIO10:
     """KIO10 transport over HTTP: `POST /jobs` and `GET /jobs/{job_id}`.
 
     One `httpx2.AsyncClient` is opened on the first request and reused by every
-    later request, so polling keeps its connection instead of reconnecting. A
-    client belongs to the event loop that opened it; a request from another
-    loop opens a fresh client. Call `aclose` when the transport is no longer
-    needed; after that the transport refuses further requests.
+    later request, so polling keeps its connection instead of reconnecting. The
+    client belongs to the event loop that opened it, and the transport refuses
+    requests from any other loop: create one transport per loop. Call `aclose`
+    when the transport is no longer needed; after that it refuses all requests.
     """
 
     def __init__(
@@ -220,7 +234,8 @@ class HttpKIO10:
         """GET `/jobs/{job_id}` and return the current reply.
 
         Args:
-            job_id: The job id from the acknowledgement.
+            job_id: The job id from the acknowledgement; encoded as one path
+                segment so it cannot alter the request path or query.
 
         Returns:
             The acknowledgement while the job is running, otherwise the final
@@ -230,7 +245,7 @@ class HttpKIO10:
             TransportError: If the agent cannot be reached or returns an error
                 or a non-JSON body.
         """
-        return await self._call("GET", f"/jobs/{job_id}")
+        return await self._call("GET", f"/jobs/{quote(job_id, safe='')}")
 
     async def _call(
         self, method: str, path: str, body: dict[str, Any] | None = None
@@ -266,25 +281,28 @@ class HttpKIO10:
         return parsed
 
     def _get_client(self) -> httpx2.AsyncClient:
-        """Return the client for the running event loop, opening one if needed.
-
-        A client opened under a loop that has since been closed cannot be
-        closed any more; it is dropped and replaced.
+        """Return the shared client, opening it on first use.
 
         Returns:
-            The `httpx2.AsyncClient` shared by every request on this loop.
+            The `httpx2.AsyncClient` shared by every request of this transport.
 
         Raises:
-            TransportError: If the transport has been closed.
+            TransportError: If the transport has been closed, or the client was
+                opened under a different event loop.
         """
         if self._closed:
             raise TransportError("Transport is closed")
         loop = asyncio.get_running_loop()
-        if self._client is None or self._loop is not loop:
+        if self._client is None:
             self._client = httpx2.AsyncClient(
                 timeout=self._timeout, transport=self._httpx_transport
             )
             self._loop = loop
+        elif self._loop is not loop:
+            raise TransportError(
+                "Transport is bound to another event loop; create one transport "
+                "per loop"
+            )
         return self._client
 
     async def aclose(self) -> None:
