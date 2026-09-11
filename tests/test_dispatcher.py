@@ -1177,3 +1177,43 @@ def test_dispatch_plan_runs_plan_writes_report_and_returns_summary(
 
     assert "success" in text and "skipped" in text
     assert (tmp_path / "dispatch_sess01_wf-test01.json").exists()
+
+
+def test_step_data_is_sent_in_the_request() -> None:
+    step = Step(
+        step_id="s1",
+        agent_id="KIO10",
+        capability="tinyml",
+        task="Train",
+        data={
+            "task_model": {
+                "uri": "shm://demo/pim/v1",
+                "schema_id": "task_model/1.0",
+            }
+        },
+    )
+    request = build_request("wf-data01", step, {})
+    assert request["data"]["task_model"]["uri"] == "shm://demo/pim/v1"
+
+
+def test_dependency_artifacts_join_step_data() -> None:
+    step = Step(
+        step_id="s2",
+        agent_id="KIO10",
+        capability="tinyml",
+        task="Train",
+        data={
+            "task_model": {
+                "uri": "shm://demo/pim/v1",
+                "schema_id": "task_model/1.0",
+            }
+        },
+    )
+    from_deps = {
+        "energy_report": {
+            "uri": "shm://artifacts/wf/s1/energy_report/v1",
+            "schema_id": "energy_report/1.0",
+        }
+    }
+    request = build_request("wf-data02", step, from_deps)
+    assert set(request["data"]) == {"task_model", "energy_report"}
