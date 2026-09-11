@@ -15,6 +15,7 @@ Providers are loaded dynamically from `<provider>_client.py`, keeping the main a
 - Python 3.10 or newer
 - An Ollama installation, OpenAI API key, or Anthropic API key
 - Access to the model configured in `config.json`
+- Docker with Docker Compose (optional, for local trace and metric storage)
 
 ## Installation
 
@@ -45,6 +46,18 @@ python3 main.py
 
 See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
+## Observability
+
+<!-- KIO1 can export OpenTelemetry traces and metrics to a local persistent Tempo and Prometheus stack. Telemetry is disabled by default.
+
+Start the observability services with:
+
+```bash
+docker compose -f observability/compose.telemetry.yaml up -d
+```
+
+See the [Observability Guide](docs/observability.md) for configuration, querying, retention, and safe-shutdown instructions. -->
+
 ## Running Tests
 
 ```bash
@@ -71,3 +84,4 @@ KIO1 sends plan steps to the KIO agents listed below. Only agents with an agreed
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification
 - [Development Guide](docs/development.md) — Setup, testing, and contribution guidelines
 - [Troubleshooting](docs/troubleshooting.md) — Common errors and how to resolve them
+- [Observability](docs/observability.md) — Tracing, metrics, storage, querying, and safe shutdown
