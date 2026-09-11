@@ -1,3 +1,4 @@
+import json
 import logging
 import sys
 from formatter import format_json
@@ -9,6 +10,7 @@ from chat_history import (
     load_messages,
 )
 from config_loader import load_config
+from kio10.dispatcher import dispatch_plan
 from prompt_loader import load_prompt
 from provider_client import load_provider
 from session_logger import generate_session_id, init_logger
@@ -22,6 +24,7 @@ from telemetry import (
     trace_provider_preload,
     trace_turn,
 )
+from workflow_plan import parse_plan
 
 logger = logging.getLogger("main")
 
@@ -129,6 +132,21 @@ def main() -> None:
                     append_user_message(chat_file, query)
                     append_assistant_message(chat_file, content)
                     print(f"\n{formatted}")
+
+                try:
+                    plan = parse_plan(json.loads(formatted))
+                except ValueError as error:
+                    logger.warning("Plan check failed: turn=%d error=%s", turn, error)
+                    print(f"\nPlan check: FAILED, {error}")
+                    continue
+                print(
+                    f"\nPlan check: OK, {len(plan.steps)} steps, {plan.execution_mode}"
+                )
+
+                if config.dispatch.enabled:
+                    settings = config.dispatch
+                    report = dispatch_plan(plan, settings, "logs", session_id)
+                    print(f"\n{report}")
 
             except Exception as e:
                 logger.exception("Request failed: turn=%d", turn)

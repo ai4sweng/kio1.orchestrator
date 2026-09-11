@@ -24,6 +24,11 @@ All application settings are stored in `config.json` at the project root.
 | `telemetry.otlp_bearer_token` | string | Bearer token sent as `Authorization: Bearer <token>` to the Collector, if it requires authentication (default: `""`, no header sent) |
 | `telemetry.metric_export_interval_ms` | int | Positive metric-export interval in milliseconds (default: `5000`) |
 | `telemetry.trace_sample_ratio` | number | Fraction of traces sampled, from `0.0` to `1.0` (default: `1.0`) |
+| `dispatch.enabled` | bool | Send plan steps to KIO agents after printing the plan (default: `false`) |
+| `dispatch.poll_interval_seconds` | number | Pause between polls of a running job (default: `2`) |
+| `dispatch.step_timeout_seconds` | number | Maximum time for one step from submission to final reply (default: `600`) |
+| `dispatch.max_parallel_steps` | int | Maximum number of steps in flight at once, whatever the dependencies allow; must be positive (default: `4`) |
+| `dispatch.agents` | object | Agent id to address: `http://`/`https://` endpoint or `stub://` for the in-memory stub; missing agents are treated as not deployed |
 
 ## Example `config.json`
 
@@ -49,6 +54,15 @@ All application settings are stored in `config.json` at the project root.
     "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384
+    },
+    "dispatch": {
+        "enabled": false,
+        "poll_interval_seconds": 2,
+        "step_timeout_seconds": 600,
+        "max_parallel_steps": 4,
+        "agents": {
+            "KIO10": "stub://"
+        }
     }
 }
 ```
@@ -159,6 +173,10 @@ For setup, querying, retention, and safe shutdown instructions, see the [Observa
 
 Do not put API keys in `config.json`, source files, or committed shell scripts. The OpenAI and Anthropic SDKs automatically read the `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` environment variables. Variables set with the commands above last only until the terminal session is closed.
 
+
+## Dispatch
+
+The `dispatch` section is optional and off by default. Set `enabled` to `true` to send each plan step to its agent and print a per-step report. See [Dispatch](dispatch.md) for the message contract, dependency handling and result statuses.
 
 ## Custom System Prompts
 

@@ -21,5 +21,14 @@
     "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384
+    },
+    "dispatch": {
+        "enabled": false,
+        "poll_interval_seconds": 2,
+        "step_timeout_seconds": 600,
+        "max_parallel_steps": 4,
+        "agents": {
+            "KIO10": "stub://"
+        }
     }
 }
