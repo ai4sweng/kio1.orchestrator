@@ -53,10 +53,19 @@ pytest -q
 
 See [Development Guide](docs/development.md) for the full test, lint, and format workflow.
 
+## KIO Agents
+
+KIO1 sends plan steps to the KIO agents listed below. Only agents with an agreed message contract are integrated; steps addressed to any other agent are reported as skipped. See [Dispatch](docs/dispatch.md) for the message flow.
+
+| Agent | Responsibility | Repository | Integration |
+|-------|----------------|------------|-------------|
+| KIO10 | TinyML and energy-efficiency analysis for resource-constrained devices (IoT, Edge AI, embedded systems) | [ai4sweng/AI4SWENG-KIO10](https://github.com/ai4sweng/AI4SWENG-KIO10) | Contract implemented in `kio10/`; exercised against the in-memory stub until the agent's HTTP endpoint is deployed |
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — System overview, components, and data flow
 - [Configuration](docs/configuration.md) — All config.json settings explained
+- [Dispatch](docs/dispatch.md) — Sending plan steps to KIO agents, dependencies, KIO10 contract, stub agent
 - [Usage Guide](docs/usage.md) — Interactive session examples and workflows
 - [API Reference](docs/api-reference.md) — Module and function documentation
 - [Chat History Format](docs/chat-history.md) — JSONL session file specification

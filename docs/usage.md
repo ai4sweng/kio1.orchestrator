@@ -79,7 +79,21 @@ Response:
   ],
   "explanation": "Full lifecycle for a user management API with security review."
 }
+
+Plan check: OK, 6 steps, sequential
 ```
+
+The `Plan check` line is printed after every plan. It reports whether the plan
+can be executed: every step has valid fields, dependencies reference known
+steps and form no cycle. A plan that fails the check is still printed and saved
+to the chat history, but it is not dispatched:
+
+```
+Plan check: FAILED, Step 's3' depends on unknown step 's9'
+```
+
+With `dispatch.enabled` set in `config.json`, a per-step dispatch report follows
+the check. See [Dispatch](dispatch.md).
 
 ### Bug fix request
 
