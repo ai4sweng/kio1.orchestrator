@@ -1,7 +1,7 @@
 {
     "provider": "ollama",
     "allowed_providers": ["ollama", "openai", "anthropic"],
-    "model": "qwen2.5:3b",
+    "model": "ministral-3:8b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
     "temperature": 0.2,
@@ -9,26 +9,17 @@
     "keep_alive": -1,
     "max_output_tokens": 4096,
     "telemetry": {
-        "enabled": true,                                // Set to true to enable telemetry, false to disable
+        "enabled": true,
         "service_name": "kio1-orchestrator",
-        "otlp_http_endpoint": "http://YOUR_HOST:4318",  // Replace with your actual endpoint, my otlp endpoint is localhost, so i replace with 192.168. . . , if we use static ip, digitalocean server or tailscale our work is very easy.  
-        "otlp_bearer_token": "local-dev-otlp-token",    // Replace with your actual token, my otlp token is local-dev-otlp-token
-        "metric_export_interval_ms": 5000,              // Interval in milliseconds for exporting metrics
+        "otlp_http_endpoint": "http://157.230.17.89:4318",
+        "otlp_bearer_token": "local-dev-otlp-token",
+        "metric_export_interval_ms": 5000,
         "trace_sample_ratio": 1.0,                      
-        "kio_id": "kio1",                               // kio instance id, you can change it to your own kio instance id, but make sure it is unique for each instance
+        "kio_id": "kio1",
         "deployment_environment": "local"
     },
     "provider_options": {
         "endpoint": "http://localhost:11434",
         "context_window_size": 16384
-    },
-    "dispatch": {
-        "enabled": false,
-        "poll_interval_seconds": 2,
-        "step_timeout_seconds": 600,
-        "max_parallel_steps": 4,
-        "agents": {
-            "KIO10": "stub://"
-        }
     }
 }

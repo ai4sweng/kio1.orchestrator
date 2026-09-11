@@ -57,17 +57,6 @@ graph TD
 | `formatter.py` | Pretty-prints JSON responses for terminal display |
 | `telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
 | `observability/` | Defines the persistent Collector, Tempo, and Prometheus services |
-
-## Data Flow
-
-1. A session ID is generated, logging is initialized, and configuration is loaded.
-2. OpenTelemetry is initialized when `telemetry.enabled` is `true`.
-3. The system prompt and configured provider are loaded, and the model is preloaded or validated inside the startup trace.
-4. A new JSONL chat file is created and the session-started metric is recorded.
-5. Each user request runs inside a turn trace containing the provider request and response-formatting spans.
-6. Provider response metadata, token usage, workflow structure, and request durations are recorded without prompt or response content.
-7. User and assistant messages are appended to the chat file after each exchange.
-8. On exit, the session-completed metric is recorded and pending telemetry is flushed.
 | `workflow_plan.py` | Parses a plan into typed steps with explicit `depends_on`; rejects cycles and unknown dependencies |
 | `kio10/dispatcher.py` | Runs plan steps as `asyncio` tasks ordered by dependencies, passes artifacts downstream, builds the report |
 | `kio10/transport.py` | KIO1 ↔ KIO10 message contract: request builder, submit-and-poll loop, HTTP transport over `httpx2` |
@@ -75,13 +64,16 @@ graph TD
 
 ## Data Flow
 
-1. A session id is generated and logging is initialized, then configuration and the system prompt are loaded.
-2. The configured provider's model is preloaded (Ollama loads it into memory with `keep_alive: -1`; OpenAI and Anthropic verify the model exists — a no-op cost-wise otherwise, since they're hosted APIs).
-3. A new JSONL chat file is created for the session.
-4. The REPL loop reads user input, loads prior messages from the chat file, sends the full conversation to Ollama, and displays the formatted JSON workflow plan.
-5. Both user and assistant messages are appended to the chat file after each exchange.
-6. The plan is validated by `workflow_plan.py` and a one-line `Plan check` verdict is printed under it. The model's JSON is printed unchanged so that it stays comparable with the `kio1.evals` results.
-7. When `dispatch.enabled` is set and the check passed, each step is sent to its agent in dependency order, and a per-step report is printed and stored as `logs/dispatch_<session_id>_<workflow_id>.json`. See [Dispatch](dispatch.md).
+1. A session ID is generated, logging is initialized, and configuration is loaded.
+2. OpenTelemetry is initialized when `telemetry.enabled` is `true`.
+3. Inside the startup trace, the system prompt and configured provider are loaded. Ollama preloads the model using the configured `keep_alive`; OpenAI and Anthropic verify that the configured model exists.
+4. A new JSONL chat file is created and the session-started metric is recorded.
+5. For each user request, the REPL loads the prior messages, adds the new query, and sends the full conversation to the configured provider inside a turn trace.
+6. The provider response is formatted and displayed as an unchanged JSON workflow plan, then the user and assistant messages are appended to the chat file.
+7. `workflow_plan.py` validates the plan, including its fields, dependencies, and cycles, and prints a one-line `Plan check` verdict.
+8. If `dispatch.enabled` is `true` and validation passed, the dispatcher sends steps to their agents in dependency order, passes artifacts downstream, and prints and stores a report at `logs/dispatch_<session_id>_<workflow_id>.json`. See [Dispatch](dispatch.md).
+9. Throughout startup and each turn, telemetry records privacy-safe provider metadata, token usage, workflow structure, durations, traces, and metrics without prompt or response content.
+10. On exit, the session-completed metric is recorded and pending telemetry is flushed.
 
 ## Design Decisions
 
@@ -97,4 +89,3 @@ graph TD
 - **Optional telemetry**: OpenTelemetry is disabled by default, allowing KIO1 to run without Docker or a Collector.
 - **Privacy-aware instrumentation**: Telemetry contains operational metadata but excludes prompts, responses, exception messages, and stack traces.
 - **Persistent observability storage**: Collector queues, Tempo traces, and Prometheus metrics use named Docker volumes that survive container recreation.
-
