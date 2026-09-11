@@ -60,10 +60,16 @@ class KIO10Transport(Protocol):
 def build_request(workflow_id: str, step: Step, data: dict[str, Any]) -> dict[str, Any]:
     """Build a KIO1 -> KIO10 request message in the documented format.
 
+    The request's `data` starts with the references the plan declared on the
+    step and adds the artifacts of finished dependencies; a dependency
+    artifact overrides a same-named plan reference, because it is the fresher
+    result.
+
     Args:
         workflow_id: The workflow the step belongs to.
         step: The plan step being dispatched.
-        data: References to inputs, keyed by name, each with `uri` and `schema_id`.
+        data: References from dependency artifacts, keyed by name, each with
+            `uri` and `schema_id`.
 
     Returns:
         The request as a JSON-serialisable dict.
@@ -74,7 +80,7 @@ def build_request(workflow_id: str, step: Step, data: dict[str, Any]) -> dict[st
         "step_id": step.step_id,
         "capability": step.capability,
         "task": step.task,
-        "data": data,
+        "data": {**step.data, **data},
     }
 
 

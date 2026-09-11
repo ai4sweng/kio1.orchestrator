@@ -2,7 +2,8 @@
 
 import logging
 import re
-from dataclasses import dataclass, replace
+from collections.abc import Mapping
+from dataclasses import dataclass, field, replace
 from itertools import pairwise
 from typing import Any
 
@@ -22,6 +23,7 @@ class Step:
     capability: str
     task: str
     depends_on: tuple[str, ...] = ()
+    data: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -165,7 +167,42 @@ def _parse_step(raw: dict[str, Any]) -> Step:
         capability=capability,
         task=task,
         depends_on=tuple(depends_on),
+        data=_parse_data(raw.get("data", {}), context),
     )
+
+
+def _parse_data(raw: Any, context: str) -> Mapping[str, Any]:
+    """Validate a step's optional input references.
+
+    Args:
+        raw: The step's `data` value from the plan.
+        context: What holds the field, for error messages.
+
+    Returns:
+        The references, one entry per input name: a reference object with a
+        string `uri`, or a list of such objects (the contract's `datasets`).
+
+    Raises:
+        ValueError: If `data` is not an object, or an entry is neither a
+            reference object with a non-empty string `uri` (plus an optional
+            string `schema_id`) nor a list of them.
+    """
+    if not isinstance(raw, dict):
+        raise ValueError(f"{context}: data must be a JSON object")
+    for name, reference in raw.items():
+        entry = f"{context}: data entry {name!r}"
+        references = reference if isinstance(reference, list) else [reference]
+        for item in references:
+            if not isinstance(item, dict):
+                raise ValueError(f"{entry} must be a JSON object or a list "
+                                 "of them")
+            uri = item.get("uri")
+            if not isinstance(uri, str) or not uri.strip():
+                raise ValueError(f"{entry} needs a non-empty string uri")
+            schema_id = item.get("schema_id")
+            if schema_id is not None and not isinstance(schema_id, str):
+                raise ValueError(f"{entry}: schema_id must be a string")
+    return raw
 
 
 def _derive_dependencies(
