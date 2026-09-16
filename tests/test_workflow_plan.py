@@ -246,3 +246,99 @@ def test_steps_that_is_not_a_list_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="steps"):
         parse_plan(raw)
+
+
+def test_step_data_references_are_parsed() -> None:
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-d1",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO10",
+                    "capability": "tinyml",
+                    "task": "Train",
+                    "data": {
+                        "task_model": {
+                            "uri": "shm://demo/pim/v1",
+                            "schema_id": "task_model/1.0",
+                        }
+                    },
+                }
+            ],
+            "explanation": "",
+        }
+    )
+    assert plan.steps[0].data == {
+        "task_model": {
+            "uri": "shm://demo/pim/v1",
+            "schema_id": "task_model/1.0",
+        }
+    }
+
+
+def test_step_without_data_has_empty_mapping() -> None:
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-d2",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO10",
+                    "capability": "tinyml",
+                    "task": "Train",
+                }
+            ],
+            "explanation": "",
+        }
+    )
+    assert plan.steps[0].data == {}
+
+
+def test_step_data_without_uri_is_rejected() -> None:
+    with pytest.raises(ValueError, match="uri"):
+        parse_plan(
+            {
+                "workflow_id": "wf-d3",
+                "execution_mode": "sequential",
+                "steps": [
+                    {
+                        "step_id": "s1",
+                        "agent_id": "KIO10",
+                        "capability": "tinyml",
+                        "task": "Train",
+                        "data": {"task_model": {"schema_id": "task_model/1.0"}},
+                    }
+                ],
+                "explanation": "",
+            }
+        )
+
+
+def test_step_data_accepts_a_list_of_references() -> None:
+    plan = parse_plan(
+        {
+            "workflow_id": "wf-d4",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO10",
+                    "capability": "tinyml",
+                    "task": "Train",
+                    "data": {
+                        "datasets": [
+                            {
+                                "uri": "shm://demo/ds/v1",
+                                "schema_id": "dataset_bundle/1.0",
+                            }
+                        ]
+                    },
+                }
+            ],
+            "explanation": "",
+        }
+    )
+    assert plan.steps[0].data["datasets"][0]["uri"] == "shm://demo/ds/v1"

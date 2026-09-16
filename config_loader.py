@@ -20,6 +20,8 @@ class TelemetryConfig:
     trace_sample_ratio: float = 1.0
     kio_id: str = "kio1"
     deployment_environment: str = "local"
+
+
 _AGENT_ADDRESS_SCHEMES = ("http://", "https://", "stub://")
 
 
@@ -119,16 +121,12 @@ def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
     if not isinstance(kio_id, str) or not kio_id.strip():
         raise ValueError("telemetry.kio_id must be a non-empty string.")
 
-    deployment_environment = telemetry_data.get(
-        "deployment_environment", "local"
-    )
+    deployment_environment = telemetry_data.get("deployment_environment", "local")
     if (
         not isinstance(deployment_environment, str)
         or not deployment_environment.strip()
     ):
-        raise ValueError(
-            "telemetry.deployment_environment must be a non-empty string."
-        )
+        raise ValueError("telemetry.deployment_environment must be a non-empty string.")
 
     return TelemetryConfig(
         enabled=enabled,

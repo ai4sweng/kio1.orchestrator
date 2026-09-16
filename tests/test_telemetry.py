@@ -1,7 +1,7 @@
 import json
 from formatter import format_json
 from types import SimpleNamespace
-from typing import Any
+from typing import Any, cast
 from unittest.mock import MagicMock, call, patch
 
 import pytest
@@ -637,14 +637,15 @@ def test_shutdown_continues_when_metric_shutdown_fails(
 def test_heartbeat_loop_ticks_until_stopped() -> None:
     """Verify the heartbeat loop increments the counter once per interval."""
 
-    instruments = SimpleNamespace(heartbeat=MagicMock())
+    heartbeat = MagicMock()
+    instruments = cast(telemetry._Instruments, SimpleNamespace(heartbeat=heartbeat))
     stop_event = MagicMock()
     stop_event.wait.side_effect = [False, False, True]
 
     telemetry._heartbeat_loop(instruments, stop_event, "kio1")
 
-    assert instruments.heartbeat.add.call_count == 2
-    instruments.heartbeat.add.assert_called_with(1, {"kio.id": "kio1"})
+    assert heartbeat.add.call_count == 2
+    heartbeat.add.assert_called_with(1, {"kio.id": "kio1"})
     stop_event.wait.assert_called_with(telemetry._HEARTBEAT_INTERVAL_SECONDS)
 
 
@@ -653,7 +654,7 @@ def test_start_heartbeat_replaces_existing_thread(
 ) -> None:
     """Verify restarting the heartbeat stops the previous thread first."""
 
-    instruments = SimpleNamespace(heartbeat=MagicMock())
+    instruments = cast(telemetry._Instruments, SimpleNamespace(heartbeat=MagicMock()))
     monkeypatch.setattr(telemetry, "_heartbeat_thread", None)
     monkeypatch.setattr(telemetry, "_heartbeat_stop_event", None)
     monkeypatch.setattr(telemetry, "_HEARTBEAT_INTERVAL_SECONDS", 3600.0)
@@ -666,6 +667,7 @@ def test_start_heartbeat_replaces_existing_thread(
 
         telemetry._start_heartbeat(instruments, "kio1")
         second_thread = telemetry._heartbeat_thread
+        assert second_thread is not None
         assert second_thread is not first_thread
         assert not first_thread.is_alive()
         assert second_thread.is_alive()
@@ -908,9 +910,7 @@ def test_record_kpi_snapshot_records_every_d11_kpi() -> None:
         "kpi_refactoring",
         "kpi_tech_debt",
     ):
-        getattr(instruments, histogram_name).record.assert_called_once_with(
-            1.0, labels
-        )
+        getattr(instruments, histogram_name).record.assert_called_once_with(1.0, labels)
 
     instruments.kpi_customer_reported_issues.add.assert_not_called()
     instruments.kpi_cross_arch_build.add.assert_not_called()
