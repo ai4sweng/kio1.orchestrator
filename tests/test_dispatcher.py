@@ -1217,3 +1217,51 @@ def test_dependency_artifacts_join_step_data() -> None:
     }
     request = build_request("wf-data02", step, from_deps)
     assert set(request["data"]) == {"task_model", "energy_report"}
+
+
+def test_dependency_artifact_overrides_same_named_plan_reference() -> None:
+    step = Step(
+        step_id="s2",
+        agent_id="KIO10",
+        capability="tinyml",
+        task="Train",
+        data={
+            "energy_report": {"uri": "shm://stale/energy/v0", "schema_id": "old/0.9"},
+            "task_model": {"uri": "shm://demo/pim/v1", "schema_id": "task_model/1.0"},
+        },
+    )
+    from_deps = {
+        "energy_report": {
+            "uri": "shm://artifacts/wf/s1/energy_report/v1",
+            "schema_id": "energy_report/1.0",
+        }
+    }
+
+    request = build_request("wf-data03", step, from_deps)
+
+    assert request["data"]["energy_report"] == from_deps["energy_report"]
+    assert request["data"]["task_model"] == step.data["task_model"]
+
+
+def test_run_workflow_lets_fresh_dependency_artifact_replace_plan_reference() -> None:
+    stub = RecordingStub(polls_before_done=0)
+    stale = {"uri": "shm://stale/energy_efficiency_result/v0", "schema_id": "old/0.9"}
+    plan = make_plan(
+        make_step("s1"),
+        Step(
+            step_id="s2",
+            agent_id="KIO10",
+            capability="tinyml",
+            task="Retrain",
+            depends_on=("s1",),
+            data={"energy_efficiency_result": stale, "task_model": stale},
+        ),
+    )
+
+    run(plan, make_settings(), transports={"KIO10": stub})
+
+    data = stub.requests["s2"]["data"]
+    assert data["energy_efficiency_result"]["uri"].endswith(
+        "/s1/energy_efficiency_result/v1"
+    ), "the dependency's fresh artifact must win over the plan's stale reference"
+    assert data["task_model"] == stale, "plan-only references are kept"

@@ -194,8 +194,7 @@ def _parse_data(raw: Any, context: str) -> Mapping[str, Any]:
         references = reference if isinstance(reference, list) else [reference]
         for item in references:
             if not isinstance(item, dict):
-                raise ValueError(f"{entry} must be a JSON object or a list "
-                                 "of them")
+                raise ValueError(f"{entry} must be a JSON object or a list of them")
             uri = item.get("uri")
             if not isinstance(uri, str) or not uri.strip():
                 raise ValueError(f"{entry} needs a non-empty string uri")
