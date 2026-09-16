@@ -259,8 +259,7 @@ def _create_instruments(meter: Meter) -> _Instruments:
             "kio.llm.token_count",
             unit="{token}",
             description=(
-                "LLM token usage by direction (contract metric "
-                "kio_llm_token_count)."
+                "LLM token usage by direction (contract metric " "kio_llm_token_count)."
             ),
         ),
         llm_cost_usd=meter.create_counter(
@@ -602,9 +601,7 @@ def _record_kpi_snapshot(is_error: bool) -> None:
         round(random.uniform(65.0, 95.0), 1), labels
     )
     # KPI 1.2 — Issue resolution speed: baseline ~8-12h, target <=70%.
-    instruments.kpi_issue_resolution.record(
-        round(random.uniform(5.0, 9.0), 2), labels
-    )
+    instruments.kpi_issue_resolution.record(round(random.uniform(5.0, 9.0), 2), labels)
     # KPI 2.1 — Lifecycle energy reduction: baseline 100%, target <=85%.
     instruments.kpi_lifecycle_energy.record(
         round(random.uniform(78.0, 96.0), 1), labels
@@ -615,39 +612,25 @@ def _record_kpi_snapshot(is_error: bool) -> None:
         round(random.uniform(6.5, 10.5), 2), labels
     )
     # KPI 3.1 — Code quality improvement: baseline 100%, target <=70%.
-    instruments.kpi_code_quality.record(
-        round(random.uniform(65.0, 90.0), 1), labels
-    )
+    instruments.kpi_code_quality.record(round(random.uniform(65.0, 90.0), 1), labels)
     # KPI 3.2 — Review score increase: baseline ~3.5/5, target ~4.2/5.
     instruments.kpi_review_score.record(round(random.uniform(3.6, 4.4), 2), labels)
     # KPI 4.1 — Developer productivity: baseline ~0.5-0.8 features/day.
-    instruments.kpi_dev_productivity.record(
-        round(random.uniform(0.6, 1.1), 2), labels
-    )
+    instruments.kpi_dev_productivity.record(round(random.uniform(0.6, 1.1), 2), labels)
     # KPI 5.1 — Time-to-Market: baseline ~5-7 days scaled to D1.1's ~30-45
     # day pilot-feature baseline, target <=70%.
-    instruments.kpi_time_to_market.record(
-        round(random.uniform(24.0, 38.0), 1), labels
-    )
+    instruments.kpi_time_to_market.record(round(random.uniform(24.0, 38.0), 1), labels)
     # KPI 6.1 — Bug-fix time: baseline ~8-12h, target <=80%.
-    instruments.kpi_bugfix_duration.record(
-        round(random.uniform(6.0, 10.0), 2), labels
-    )
+    instruments.kpi_bugfix_duration.record(round(random.uniform(6.0, 10.0), 2), labels)
     # KPI 6.2 — Customer-reported issues: rare event, only on some errors.
     if is_error and random.random() < 0.05:
-        instruments.kpi_customer_reported_issues.add(
-            random.randint(1, 2), labels
-        )
+        instruments.kpi_customer_reported_issues.add(random.randint(1, 2), labels)
     # KPI 7.1 — Annual cost saving: target range ~12-28%.
     instruments.kpi_cost_saving.record(round(random.uniform(12.0, 28.0), 1), labels)
     # KPI 8.1 — Adoption rate: baseline 0%, target >=50%, simulated mid-ramp.
-    instruments.kpi_adoption_rate.record(
-        round(random.uniform(32.0, 58.0), 1), labels
-    )
+    instruments.kpi_adoption_rate.record(round(random.uniform(32.0, 58.0), 1), labels)
     # KPI 8.2 — Active usage & satisfaction: usage target >=60%, MOS >=4.0.
-    instruments.kpi_adoption_usage.record(
-        round(random.uniform(45.0, 68.0), 1), labels
-    )
+    instruments.kpi_adoption_usage.record(round(random.uniform(45.0, 68.0), 1), labels)
     instruments.kpi_adoption_mos.record(round(random.uniform(3.4, 4.3), 2), labels)
     # KPI 8.3 — Cross-Architecture Build Success Rate: rare, discrete event.
     if random.random() < 0.05:
@@ -746,9 +729,7 @@ def trace_turn(
                 # platform's kio-simulator request definition. kio.id is
                 # attached explicitly (not just via the resource attribute),
                 # matching the platform's kio-simulator convention.
-                instruments.request_count.add(
-                    1, {"status": status, "kio.id": _kio_id}
-                )
+                instruments.request_count.add(1, {"status": status, "kio.id": _kio_id})
                 instruments.request_duration_ms.record(
                     elapsed_seconds * 1000, {"kio.id": _kio_id}
                 )
@@ -937,9 +918,7 @@ def record_gen_ai_response(
         # Contract mandatory metric kio_llm_cost_usd. This is an estimate
         # from a fixed per-provider coefficient (_COST_PER_1K_TOKENS_USD),
         # not real provider billing data.
-        cost_usd = (
-            total_tokens / 1000
-        ) * _COST_PER_1K_TOKENS_USD.get(provider, 0.0)
+        cost_usd = (total_tokens / 1000) * _COST_PER_1K_TOKENS_USD.get(provider, 0.0)
         if cost_usd > 0:
             instruments.llm_cost_usd.add(cost_usd, {"kio.id": _kio_id})
 
