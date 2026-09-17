@@ -46,6 +46,22 @@ python3 main.py
 
 See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
+### In Docker
+
+The orchestrator also ships a `Dockerfile`. It reaches services on the host
+(Ollama, the KIO10 service) via `host.docker.internal`, so run it with that
+host mapping and the container config that points there:
+
+```bash
+docker build -t kio1 .
+docker run -it --add-host=host.docker.internal:host-gateway \
+  -v "$PWD/config.docker.json:/app/config.json" kio1
+```
+
+`config.docker.json` is `config.json` with the Ollama endpoint and the KIO10
+agent address set to `host.docker.internal`. Ollama and the KIO10 service must
+be running on the host first (with KIO10 published on `:8010`).
+
 ## Observability
 
 <!-- KIO1 can export OpenTelemetry traces and metrics to a local persistent Tempo and Prometheus stack. Telemetry is disabled by default.
