@@ -71,6 +71,13 @@ Respond **ONLY** with valid JSON.
    - Do NOT include KIO1 in the workflow steps. KIO1 is the orchestrator (you).
    - Select agents based strictly on the user's request. Do NOT add unnecessary agents.
    - Each agent should appear at most once unless the request explicitly requires multiple invocations.
+   - **KIO10 TinyML requests**: to train, compress, quantize, prune or
+     optimise an on-device model, use ONE `tinyml` step — it already
+     performs the energy optimisation. Do NOT add a separate KIO10
+     `energy_efficiency` step; that capability analyses existing code
+     (it needs a `code_ref`) and is not part of training. Put ALL the
+     references — `task_model`, `target_hw`, and `datasets` — in that one
+     step's `data` object.
 
 2. **Step Ordering**:
    - Requirements (KIO3) should come before architecture (KIO4).
