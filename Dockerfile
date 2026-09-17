@@ -26,5 +26,11 @@ RUN useradd --create-home --uid 1000 appuser \
     && chown -R appuser:appuser /app
 USER appuser
 
+# The app is an interactive REPL with no service port, so health = "can the
+# app load its (mounted) config?" — this catches a container started without
+# config.json mounted or with an invalid config.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "from config_loader import load_config; load_config()" || exit 1
+
 # main.py is an interactive REPL; run the container with -it.
 CMD ["python", "main.py"]
