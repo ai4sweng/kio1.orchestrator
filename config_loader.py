@@ -1,6 +1,7 @@
 import json
 import logging
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -172,6 +173,17 @@ def load_config(config_path: str = "config.json") -> Config:
         raise ValueError("max_output_tokens must be a positive integer.")
 
     dispatch = _parse_dispatch(data.get("dispatch"))
+
+    # Runtime endpoint overrides so one config.json serves both the host and
+    # a container (no second config file to drift): a container passes these
+    # env vars pointing at host.docker.internal instead of localhost.
+    ollama_endpoint = os.environ.get("KIO1_OLLAMA_ENDPOINT")
+    if ollama_endpoint:
+        provider_options = {**provider_options, "endpoint": ollama_endpoint}
+    kio10_address = os.environ.get("KIO1_KIO10_ADDRESS")
+    if kio10_address:
+        dispatch = replace(
+            dispatch, agents={**dispatch.agents, "KIO10": kio10_address})
 
     logger.info(
         "Config loaded: provider=%s model=%s prompt_path=%s",

@@ -1,0 +1,36 @@
+# KIO1 orchestrator — interactive terminal app (LLM planner + KIO dispatcher).
+# Build:  docker build -t kio1 .
+#
+# config.json is NOT baked into the image (it carries credentials); mount it
+# at runtime. The orchestrator reaches host services via host.docker.internal,
+# so override the two endpoints with env vars — one config.json serves both
+# host and container:
+#   docker run -it --add-host=host.docker.internal:host-gateway \
+#     -v "$PWD/config.json:/app/config.json" \
+#     -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
+#     -e KIO1_KIO10_ADDRESS=http://host.docker.internal:8010 \
+#     kio1
+FROM python:3.12-slim
+
+WORKDIR /app
+
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+# Run as a non-root user. It owns /app so the app can write its logs/ and
+# chats/ directories, and a mounted config.json (host perms permitting).
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/logs /app/chats \
+    && chown -R appuser:appuser /app
+USER appuser
+
+# The app is an interactive REPL with no service port, so health = "can the
+# app load its (mounted) config?" — this catches a container started without
+# config.json mounted or with an invalid config.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
+    CMD python -c "from config_loader import load_config; load_config()" || exit 1
+
+# main.py is an interactive REPL; run the container with -it.
+CMD ["python", "main.py"]

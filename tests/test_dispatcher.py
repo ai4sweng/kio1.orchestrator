@@ -1265,3 +1265,23 @@ def test_run_workflow_lets_fresh_dependency_artifact_replace_plan_reference() ->
         "/s1/energy_efficiency_result/v1"
     ), "the dependency's fresh artifact must win over the plan's stale reference"
     assert data["task_model"] == stale, "plan-only references are kept"
+
+
+def test_env_overrides_ollama_endpoint_and_kio10_address(tmp_path, monkeypatch) -> None:
+    path = write_config(tmp_path, {"enabled": True,
+                                   "agents": {"KIO10": "http://localhost:8010"}})
+    monkeypatch.setenv("KIO1_OLLAMA_ENDPOINT", "http://host.docker.internal:11434")
+    monkeypatch.setenv("KIO1_KIO10_ADDRESS", "http://host.docker.internal:8010")
+    config = load_config(str(path))
+    assert config.provider_options["endpoint"] == "http://host.docker.internal:11434"
+    assert config.dispatch.agents["KIO10"] == "http://host.docker.internal:8010"
+
+
+def test_env_overrides_absent_keep_file_values(tmp_path, monkeypatch) -> None:
+    path = write_config(tmp_path, {"enabled": True,
+                                   "agents": {"KIO10": "http://localhost:8010"}})
+    monkeypatch.delenv("KIO1_OLLAMA_ENDPOINT", raising=False)
+    monkeypatch.delenv("KIO1_KIO10_ADDRESS", raising=False)
+    config = load_config(str(path))
+    assert config.provider_options["endpoint"] == "http://localhost:11434"
+    assert config.dispatch.agents["KIO10"] == "http://localhost:8010"
