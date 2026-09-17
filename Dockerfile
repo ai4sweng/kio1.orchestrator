@@ -19,5 +19,12 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
+# Run as a non-root user. It owns /app so the app can write its logs/ and
+# chats/ directories, and a mounted config.json (host perms permitting).
+RUN useradd --create-home --uid 1000 appuser \
+    && mkdir -p /app/logs /app/chats \
+    && chown -R appuser:appuser /app
+USER appuser
+
 # main.py is an interactive REPL; run the container with -it.
 CMD ["python", "main.py"]
