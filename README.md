@@ -48,19 +48,25 @@ See [Usage Guide](docs/usage.md) for example sessions and sample requests.
 
 ### In Docker
 
-The orchestrator also ships a `Dockerfile`. It reaches services on the host
-(Ollama, the KIO10 service) via `host.docker.internal`, so run it with that
-host mapping and the container config that points there:
+The orchestrator also ships a `Dockerfile`. It reaches host services (Ollama,
+the KIO10 service) via `host.docker.internal`, so mount your `config.json` at
+runtime and override the two endpoints with env vars — the same `config.json`
+then works both on the host and in the container:
 
 ```bash
 docker build -t kio1 .
 docker run -it --add-host=host.docker.internal:host-gateway \
-  -v "$PWD/config.docker.json:/app/config.json" kio1
+  -v "$PWD/config.json:/app/config.json" \
+  -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
+  -e KIO1_KIO10_ADDRESS=http://host.docker.internal:8010 \
+  kio1
 ```
 
-`config.docker.json` is `config.json` with the Ollama endpoint and the KIO10
-agent address set to `host.docker.internal`. Ollama and the KIO10 service must
-be running on the host first (with KIO10 published on `:8010`).
+`config.json` is mounted (not baked into the image) so credentials such as
+`otlp_bearer_token` stay out of image layers. `KIO1_OLLAMA_ENDPOINT` and
+`KIO1_KIO10_ADDRESS` override the file's endpoints at runtime, so there is no
+second config file to drift. Ollama and the KIO10 service must be running on
+the host first (with KIO10 published on `:8010`).
 
 ## Observability
 

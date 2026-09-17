@@ -9,3 +9,7 @@ __pycache__
 chats
 logs
 tasks
+# config.json carries credentials (e.g. otlp_bearer_token) — keep it out of
+# the image layers and mount it at runtime instead:
+#   docker run -v "$PWD/config.json:/app/config.json" kio1
+config.json
