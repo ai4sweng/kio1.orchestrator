@@ -4,7 +4,7 @@
     "model": "ministral-3:8b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
-    "temperature": 0,
+    "temperature": 0.2,
     "request_timeout": 120,
     "keep_alive": -1,
     "max_output_tokens": 4096,
