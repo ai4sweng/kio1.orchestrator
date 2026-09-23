@@ -174,9 +174,6 @@ def load_config(config_path: str = "config.json") -> Config:
 
     dispatch = _parse_dispatch(data.get("dispatch"))
 
-    # Runtime endpoint overrides so one config.json serves both the host and
-    # a container (no second config file to drift): a container passes these
-    # env vars pointing at host.docker.internal instead of localhost.
     ollama_endpoint = os.environ.get("KIO1_OLLAMA_ENDPOINT")
     if ollama_endpoint:
         provider_options = {**provider_options, "endpoint": ollama_endpoint}
