@@ -179,8 +179,7 @@ def load_config(config_path: str = "config.json") -> Config:
         provider_options = {**provider_options, "endpoint": ollama_endpoint}
     kio10_address = os.environ.get("KIO1_KIO10_ADDRESS")
     if kio10_address:
-        dispatch = replace(
-            dispatch, agents={**dispatch.agents, "KIO10": kio10_address})
+        dispatch = replace(dispatch, agents={**dispatch.agents, "KIO10": kio10_address})
 
     logger.info(
         "Config loaded: provider=%s model=%s prompt_path=%s",
