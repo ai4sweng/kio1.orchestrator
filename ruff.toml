@@ -1,0 +1,8 @@
+# Pin the rule set so `make check` gives the same result on every ruff version.
+# These are ruff's classic defaults (pyflakes plus the pycodestyle error groups);
+# newer ruff releases enable far more rules when no configuration file exists.
+line-length = 88
+target-version = "py310"
+
+[lint]
+select = ["E4", "E7", "E9", "F"]
