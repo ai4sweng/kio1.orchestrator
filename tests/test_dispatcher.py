@@ -361,6 +361,32 @@ def test_build_request_matches_documented_format() -> None:
     }
 
 
+def test_build_request_wraps_datasets_object_into_array() -> None:
+    # The planner sometimes emits `datasets` as a single {uri, schema_id}
+    # object instead of the one-element array the KIO10 contract requires;
+    # build_request must normalize it so a natural-language plan stays valid.
+    ref = {"uri": "shm://demo/dataset/synthetic/v1",
+           "schema_id": "dataset_bundle/1.0"}
+    step = Step(step_id="s1", agent_id="KIO10", capability="tinyml",
+                task="train and compress", depends_on=(),
+                data={"datasets": ref})
+
+    request = build_request("wf-rul01", step, {})
+
+    assert request["data"]["datasets"] == [ref]
+
+
+def test_build_request_leaves_datasets_array_untouched() -> None:
+    refs = [{"uri": "shm://demo/dataset/synthetic/v1",
+             "schema_id": "dataset_bundle/1.0"}]
+    step = Step(step_id="s1", agent_id="KIO10", capability="tinyml",
+                task="train", depends_on=(), data={"datasets": refs})
+
+    request = build_request("wf-rul01", step, {})
+
+    assert request["data"]["datasets"] == refs
+
+
 def test_run_job_polls_until_final_reply() -> None:
     stub = StubKIO10(polls_before_done=2)
     request = build_request("wf-test01", make_step(), {})

@@ -16,7 +16,8 @@ Respond **ONLY** with valid JSON.
       "step_id": "s1",
       "agent_id": "KIO<N>",
       "capability": "<capability_name>",
-      "task": "<description of the task for this agent>"
+      "task": "<description of the task for this agent>",
+      "data": {"<ref_name>": {"uri": "<uri>", "schema_id": "<schema_id>"}}
     }
   ],
   "explanation": "Brief summary of the plan."

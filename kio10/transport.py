@@ -74,13 +74,21 @@ def build_request(workflow_id: str, step: Step, data: dict[str, Any]) -> dict[st
     Returns:
         The request as a JSON-serialisable dict.
     """
+    merged = {**step.data, **data}
+    # Tolerate a common planner quirk: emitting `datasets` as a single
+    # {uri, schema_id} object instead of the one-element array the KIO10
+    # contract requires. Normalize it so a natural-language request stays
+    # reliable without forcing the model to echo an exact JSON plan.
+    datasets = merged.get("datasets")
+    if isinstance(datasets, dict):
+        merged["datasets"] = [datasets]
     return {
         "schema_version": SCHEMA_VERSION,
         "workflow_id": workflow_id,
         "step_id": step.step_id,
         "capability": step.capability,
         "task": step.task,
-        "data": {**step.data, **data},
+        "data": merged,
     }
 
 
