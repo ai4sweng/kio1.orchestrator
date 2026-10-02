@@ -324,7 +324,9 @@ def write_report(report: DispatchReport, log_directory: str, session_id: str) ->
     directory = Path(log_directory)
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / f"dispatch_{session_id}_{report.workflow_id}.json"
-    path.write_text(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
+    path.write_text(
+        json.dumps(report.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     logger.info("Dispatch report written: path=%s", path)
     return path
 

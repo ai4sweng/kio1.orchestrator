@@ -28,6 +28,7 @@
         "step_timeout_seconds": 600,
         "max_parallel_steps": 4,
         "agents": {
+            "KIO2": "http://127.0.0.1:8102",
             "KIO10": "http://127.0.0.1:8010"
         }
     }

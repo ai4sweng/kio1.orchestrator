@@ -59,7 +59,7 @@ docker run -it --add-host=host.docker.internal:host-gateway \
   kio1
 ```
 
-`config.json` is mounted (not baked into the image) so credentials such as `otlp_bearer_token` stay out of image layers. `KIO1_OLLAMA_ENDPOINT` and `KIO1_KIO10_ADDRESS` override the file's endpoints at runtime, so there is no second config file to drift. Ollama and the KIO10 service must be running on the host first (with KIO10 published on `:8010`).
+`config.json` is mounted (not baked into the image) so credentials such as `otlp_bearer_token` stay out of image layers. `KIO1_OLLAMA_ENDPOINT`, `KIO1_KIO2_ADDRESS` and `KIO1_KIO10_ADDRESS` override the file's endpoints at runtime, so there is no second config file to drift. Ollama and the KIO10 service must be running on the host first (with KIO10 published on `:8010`).
 
 ## Observability
 
@@ -87,6 +87,7 @@ KIO1 sends plan steps to the KIO agents listed below. Only agents with an agreed
 
 | Agent | Responsibility | Repository | Integration |
 |-------|----------------|------------|-------------|
+| KIO2 | Bug localisation, diagnosis, replay and comparison of recorded Python executions | [ai4sweng/AI4SWENG-KIO2](https://github.com/ai4sweng/AI4SWENG-KIO2) | Speaks the KIO10 job contract unchanged (`POST /jobs`, `GET /jobs/{job_id}`); exercised live by `run_kio2_integration.py`. Steps need `repository` and `entry_point` as `file://` references |
 | KIO10 | TinyML and energy-efficiency analysis for resource-constrained devices (IoT, Edge AI, embedded systems) | [ai4sweng/AI4SWENG-KIO10](https://github.com/ai4sweng/AI4SWENG-KIO10) | Contract implemented in `kio10/`; exercised against the in-memory stub until the agent's HTTP endpoint is deployed |
 
 ## Documentation
