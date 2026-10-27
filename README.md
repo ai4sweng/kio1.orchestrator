@@ -70,6 +70,20 @@ docker run --rm -p 5000:5000 --add-host=host.docker.internal:host-gateway \
   kio1
 ```
 
+On AWS run:
+```bash
+sudo docker run --rm \
+  --name kio1 \
+  --network kio1-network \
+  -p 5000:5000 \
+  -v "$PWD/config.json:/app/config.json" \
+  -v "$PWD/chats:/app/chats" \
+  -v "$PWD/logs:/app/logs" \
+  -v "$PWD/assets:/app/assets" \
+  -e KIO1_OLLAMA_ENDPOINT=http://ollama:11434 \
+  kio1
+```
+
 Open `http://localhost:5000` once the container is running. `docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/`, `logs/`, and `assets/` keeps session history, logs, and uploaded files on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
 
 ```bash
