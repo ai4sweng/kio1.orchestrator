@@ -7,34 +7,71 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div class="app">
+  <div id="app-shell" class="app-shell">
+    <aside id="history-sidebar" class="history-sidebar" aria-label="Conversation history">
+      <button id="new-chat-button" class="new-chat-button" type="button">
+        <span class="new-chat-plus" aria-hidden="true">+</span>
+        <span>New chat</span>
+      </button>
+      <p class="history-heading">Recent conversations</p>
+      <nav id="conversation-list" class="conversation-list" aria-label="Saved conversations"></nav>
+      <p id="history-status" class="history-status" role="status" aria-live="polite"></p>
+    </aside>
+
+    <button id="history-backdrop" class="history-backdrop" type="button" aria-label="Close conversation history" hidden></button>
+
+    <div class="app">
     <header class="app-header">
-      <img class="app-logo" src="{{ url_for('static', filename='image.png') }}" alt="KIO1 Orchestrator">
+        <button id="history-toggle" class="history-toggle" type="button" aria-controls="history-sidebar" aria-expanded="false">History</button>
+      <a class="brand" href="/" aria-label="KIO1 Orchestrator home">
+        <img class="app-logo" src="{{ url_for('static', filename='image.png') }}" alt="">
+        <span class="brand-name">KIO1 <span>Orchestrator</span></span>
+      </a>
+      <div class="model-indicator" title="Configured local model">
+        <span class="model-dot" aria-hidden="true"></span>
+        <span class="model-caption">Using</span>
+        <span class="model-name">{{ model_name }}</span>
+      </div>
     </header>
 
-    <main id="messages" class="messages" aria-live="polite"></main>
+    <main id="messages" class="messages" role="log" aria-label="Conversation" aria-live="polite" aria-relevant="additions text" aria-busy="false" tabindex="0">
+      <section id="empty-state" class="empty-state" aria-labelledby="empty-title">
+        <p class="empty-eyebrow">KIO1 ORCHESTRATOR</p>
+        <h1 id="empty-title">What can I help with?</h1>
+        <p>Ask a question to get started.</p>
+      </section>
+    </main>
 
-    <p id="upload-status" class="upload-status" role="status"></p>
-
-    <div class="upload-bar">
-      <label class="upload-button">
-        Model
-        <input id="file-input-model" class="upload-input" type="file" data-category="model">
-      </label>
-      <label class="upload-button">
-        Dataset
-        <input id="file-input-dataset" class="upload-input" type="file" data-category="dataset">
-      </label>
-      <label class="upload-button">
-        File
-        <input id="file-input-file" class="upload-input" type="file" data-category="file">
-      </label>
+    <footer class="composer-area">
+      <div class="composer-inner">
+        <form id="chat-form" class="chat-form">
+          <label class="visually-hidden" for="query-input">Message KIO1</label>
+          <textarea id="query-input" placeholder="Message KIO1..." rows="1" required></textarea>
+          <div class="composer-actions">
+            <div class="upload-bar" role="group" aria-label="Upload a file">
+              <label class="upload-button">
+                <input id="file-input-model" class="upload-input" type="file" data-category="model" aria-label="Upload a model file">
+                <span class="upload-plus" aria-hidden="true">+</span>
+                <span>Model</span>
+              </label>
+              <label class="upload-button">
+                <input id="file-input-dataset" class="upload-input" type="file" data-category="dataset" aria-label="Upload a dataset">
+                <span class="upload-plus" aria-hidden="true">+</span>
+                <span>Dataset</span>
+              </label>
+              <label class="upload-button">
+                <input id="file-input-file" class="upload-input" type="file" data-category="file" aria-label="Upload a file">
+                <span class="upload-plus" aria-hidden="true">+</span>
+                <span>File</span>
+              </label>
+            </div>
+            <button class="send-button" type="submit">Send</button>
+          </div>
+        </form>
+        <p id="upload-status" class="upload-status" role="status" aria-live="polite" aria-atomic="true"></p>
+      </div>
+    </footer>
     </div>
-
-    <form id="chat-form" class="chat-form">
-      <textarea id="query-input" placeholder="Ask Ai4SwEng..." rows="1" required></textarea>
-      <button type="submit">Send</button>
-    </form>
   </div>
   <script src="{{ url_for('static', filename='app.js') }}"></script>
 </body>

@@ -31,7 +31,7 @@ Confirm that the configured model ID exists and has been pulled with `ollama pul
 
 ## Invalid JSON response
 
-The system prompt asks the model to return JSON only. The formatter also removes optional Markdown JSON fences before parsing the model's output.
+The system prompt asks the model to return JSON only. The formatter also removes optional Markdown JSON fences before parsing the model's output. The dashboard shows an error instead of the invalid raw response; inspect the server terminal output for that response.
 
 ## Response truncated
 
@@ -61,7 +61,7 @@ Each line is UTC ISO 8601 with milliseconds, then the session id, level, module,
 2026-07-24T09:21:20.108Z 20260724_101943_ff849b40 INFO main Session ended: turns=1 duration_ms=83686
 ```
 
-Timestamps are UTC, matching the `created_at` values inside Ollama's responses. The console shows only `ERROR`; everything else lives in the file.
+Timestamps are UTC, matching the `created_at` values inside Ollama's responses. The logging handler writes only `ERROR` records to stderr. Separately, each raw model response is printed to server stdout, so it is visible in the terminal or the container's standard output logs.
 
 | Level | Contents |
 |-------|----------|
@@ -69,6 +69,8 @@ Timestamps are UTC, matching the `created_at` values inside Ollama's responses. 
 | `INFO` | Session and turn markers (with total durations), config and prompt load duration, model preload duration, per-request duration, token counts and throughput |
 | `WARNING` | Recoverable issues, such as the formatter falling back to `ast.literal_eval` |
 | `ERROR` | Startup failures and failed requests (with `duration_ms` up to the point of failure), with tracebacks |
+
+Raw model response output is separate from the log levels above. It includes the full response text and may contain sensitive content; protect access to the server terminal and container logs accordingly.
 
 Useful greps:
 

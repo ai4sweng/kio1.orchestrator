@@ -2,36 +2,26 @@
   "use strict";
 
   const messagesEl = document.getElementById("messages");
+  const emptyStateEl = document.getElementById("empty-state");
+  const appShellEl = document.getElementById("app-shell");
+  const historySidebarEl = document.getElementById("history-sidebar");
+  const conversationListEl = document.getElementById("conversation-list");
+  const historyStatusEl = document.getElementById("history-status");
+  const newChatButtonEl = document.getElementById("new-chat-button");
+  const historyToggleEl = document.getElementById("history-toggle");
+  const historyBackdropEl = document.getElementById("history-backdrop");
   const formEl = document.getElementById("chat-form");
   const inputEl = document.getElementById("query-input");
   const fileInputEls = document.querySelectorAll(".upload-input");
   const uploadStatusEl = document.getElementById("upload-status");
+  const sendButtonEl = formEl.querySelector("button[type='submit']");
+  let activeConversationId = null;
 
   function escapeHtml(value) {
     return value
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;");
-  }
-
-  // Tokenizes an already-pretty-printed JSON string and wraps each token in
-  // a span so CSS can color keys/strings/numbers/booleans/null distinctly.
-  function highlightJson(jsonString) {
-    const escaped = escapeHtml(jsonString);
-    const tokenPattern =
-      /("(?:\\u[a-fA-F0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\btrue\b|\bfalse\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)/g;
-
-    return escaped.replace(tokenPattern, (match) => {
-      let cssClass = "json-number";
-      if (match.startsWith("&quot;") || match.startsWith('"')) {
-        cssClass = /:\s*$/.test(match) ? "json-key" : "json-string";
-      } else if (match === "true" || match === "false") {
-        cssClass = "json-boolean";
-      } else if (match === "null") {
-        cssClass = "json-null";
-      }
-      return `<span class="${cssClass}">${match}</span>`;
-    });
   }
 
   // Recognizes the KIO1 workflow-plan shape so it can be rendered as step
@@ -69,7 +59,7 @@
       </li>`;
   }
 
-  function renderWorkflowPlan(plan, rawJson) {
+  function renderWorkflowPlan(plan) {
     const stepsHtml = plan.steps.map(renderPlanStep).join("");
     const explanation =
       typeof plan.explanation === "string" && plan.explanation
@@ -84,10 +74,54 @@
           <span class="plan-mode">${escapeHtml(plan.execution_mode)}</span>
         </div>
         <ol class="plan-steps">${stepsHtml}</ol>
-        <details class="plan-raw">
-          <summary>View raw JSON</summary>
-          <pre>${highlightJson(rawJson)}</pre>
-        </details>
+      </div>
+    `;
+  }
+
+  function renderStructuredValue(value, depth = 0) {
+    if (depth > 6) {
+      return '<p class="data-empty">Additional nested details hidden</p>';
+    }
+
+    if (Array.isArray(value)) {
+      if (value.length === 0) {
+        return '<p class="data-empty">No items</p>';
+      }
+      return `<ul class="data-list">${value
+        .map((item) => `<li>${renderStructuredValue(item, depth + 1)}</li>`)
+        .join("")}</ul>`;
+    }
+
+    if (value && typeof value === "object") {
+      const fields = Object.entries(value);
+      if (fields.length === 0) {
+        return '<p class="data-empty">No details</p>';
+      }
+      return `<dl class="data-fields">${fields
+        .map(([key, fieldValue]) => {
+          const label = escapeHtml(key.replace(/[_-]+/g, " "));
+          return `<div class="data-field"><dt>${label}</dt><dd>${renderStructuredValue(
+            fieldValue,
+            depth + 1,
+          )}</dd></div>`;
+        })
+        .join("")}</dl>`;
+    }
+
+    if (typeof value === "string") {
+      return `<p class="data-string">${escapeHtml(value)}</p>`;
+    }
+
+    const valueClass = value === null ? "null" : typeof value;
+    return `<span class="data-primitive data-${valueClass}">${escapeHtml(
+      String(value),
+    )}</span>`;
+  }
+
+  function renderGenericJson(parsed) {
+    return `
+      <div class="structured-response">
+        ${renderStructuredValue(parsed)}
       </div>`;
   }
 
@@ -96,18 +130,24 @@
     try {
       parsed = JSON.parse(formattedJson);
     } catch {
-      parsed = null;
+      return `<p class="response-text">${escapeHtml(formattedJson)}</p>`;
     }
 
     if (isWorkflowPlan(parsed)) {
-      return renderWorkflowPlan(parsed, formattedJson);
+      return renderWorkflowPlan(parsed);
     }
-    return `<pre>${highlightJson(formattedJson)}</pre>`;
+    return renderGenericJson(parsed);
   }
 
   function appendMessage(role, { text, html, isError = false } = {}) {
+    emptyStateEl.hidden = true;
+
     const wrapper = document.createElement("div");
     wrapper.className = `message message-${role}`;
+
+    const author = document.createElement("span");
+    author.className = "message-author";
+    author.textContent = role === "user" ? "You" : "KIO1";
 
     const bubble = document.createElement("div");
     bubble.className = "bubble";
@@ -120,9 +160,166 @@
       bubble.textContent = text ?? "";
     }
 
-    wrapper.appendChild(bubble);
+    wrapper.append(author, bubble);
     messagesEl.appendChild(wrapper);
     messagesEl.scrollTop = messagesEl.scrollHeight;
+    return wrapper;
+  }
+
+  function clearMessages() {
+    messagesEl.querySelectorAll(".message").forEach((message) => message.remove());
+    emptyStateEl.hidden = false;
+  }
+
+  function renderConversationMessages(messages) {
+    clearMessages();
+    messages.forEach((message) => {
+      if (!message || typeof message.content !== "string") return;
+      if (message.role === "user") {
+        appendMessage("user", { text: message.content });
+      } else if (message.role === "assistant") {
+        appendMessage("assistant", {
+          html: renderFormattedResponse(message.content),
+        });
+      }
+    });
+  }
+
+  function setHistoryStatus(message, isError = false) {
+    historyStatusEl.textContent = message;
+    historyStatusEl.classList.toggle("error", Boolean(isError));
+  }
+
+  function setInterfaceBusy(isBusy) {
+    inputEl.disabled = isBusy;
+    sendButtonEl.disabled = isBusy;
+    messagesEl.setAttribute("aria-busy", String(isBusy));
+    historyToggleEl.disabled = isBusy;
+    historySidebarEl.querySelectorAll("button").forEach((button) => {
+      button.disabled = isBusy;
+    });
+  }
+
+  async function fetchJson(url, options = {}) {
+    const response = await fetch(url, options);
+    let data;
+    try {
+      data = await response.json();
+    } catch {
+      throw new Error(`Unexpected response (HTTP ${response.status}).`);
+    }
+    if (!response.ok) {
+      throw new Error(data.error ?? `Request failed (HTTP ${response.status}).`);
+    }
+    return data;
+  }
+
+  function formatConversationDate(value) {
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  }
+
+  function renderConversationList(conversations) {
+    conversationListEl.replaceChildren();
+    conversations.forEach((conversation) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "conversation-item";
+      button.disabled = inputEl.disabled;
+      button.classList.toggle(
+        "active",
+        conversation.id === activeConversationId,
+      );
+      if (conversation.id === activeConversationId) {
+        button.setAttribute("aria-current", "page");
+      }
+
+      const title = document.createElement("span");
+      title.className = "conversation-title";
+      title.textContent = conversation.title;
+      const date = document.createElement("span");
+      date.className = "conversation-date";
+      date.textContent = formatConversationDate(conversation.updated_at);
+      button.append(title, date);
+      button.addEventListener("click", () => {
+        activateConversation(conversation.id);
+      });
+      conversationListEl.appendChild(button);
+    });
+  }
+
+  async function refreshConversationList() {
+    const data = await fetchJson("/api/conversations");
+    activeConversationId = data.active_id;
+    renderConversationList(data.conversations);
+  }
+
+  function closeHistoryDrawer() {
+    appShellEl.classList.remove("history-open");
+    historyToggleEl.setAttribute("aria-expanded", "false");
+    historyBackdropEl.hidden = true;
+  }
+
+  async function activateConversation(conversationId) {
+    setInterfaceBusy(true);
+    setHistoryStatus("");
+    try {
+      const data = await fetchJson(
+        `/api/conversations/${encodeURIComponent(conversationId)}/activate`,
+        { method: "POST" },
+      );
+      activeConversationId = data.id;
+      renderConversationMessages(data.messages);
+      closeHistoryDrawer();
+      await refreshConversationList();
+    } catch (error) {
+      setHistoryStatus(error.message, true);
+    } finally {
+      setInterfaceBusy(false);
+      inputEl.focus();
+    }
+  }
+
+  async function initializeConversationHistory() {
+    setInterfaceBusy(true);
+    try {
+      await refreshConversationList();
+      if (activeConversationId) {
+        const data = await fetchJson(
+          `/api/conversations/${encodeURIComponent(activeConversationId)}/activate`,
+          { method: "POST" },
+        );
+        renderConversationMessages(data.messages);
+      }
+    } catch (error) {
+      setHistoryStatus(error.message, true);
+    } finally {
+      setInterfaceBusy(false);
+    }
+  }
+
+  async function createConversation() {
+    setInterfaceBusy(true);
+    setHistoryStatus("");
+    try {
+      const data = await fetchJson("/api/conversations", { method: "POST" });
+      activeConversationId = data.id;
+      renderConversationMessages(data.messages);
+      closeHistoryDrawer();
+      await refreshConversationList();
+    } catch (error) {
+      setHistoryStatus(error.message, true);
+    } finally {
+      setInterfaceBusy(false);
+      inputEl.focus();
+    }
+  }
+
+  function resizeInput() {
+    inputEl.style.height = "auto";
+    inputEl.style.height = `${Math.min(inputEl.scrollHeight, 128)}px`;
+    inputEl.style.overflowY = inputEl.scrollHeight > 128 ? "auto" : "hidden";
   }
 
   function setUploadStatus(message, isError) {
@@ -145,22 +342,20 @@
     }
 
     if (data.formatted) {
-      appendMessage("assistant", { html: renderFormattedResponse(data.formatted) });
-      return;
+      return { html: renderFormattedResponse(data.formatted) };
     }
 
     if (data.raw) {
-      appendMessage("assistant", {
-        text: `${data.error ?? "Could not format response."}\n\n${data.raw}`,
+      return {
+        text: data.error ?? "Could not format the model response.",
         isError: true,
-      });
-      return;
+      };
     }
 
-    appendMessage("assistant", {
+    return {
       text: data.error ?? `Request failed (HTTP ${response.status}).`,
       isError: true,
-    });
+    };
   }
 
   formEl.addEventListener("submit", async (event) => {
@@ -170,28 +365,50 @@
 
     appendMessage("user", { text: query });
     inputEl.value = "";
-    inputEl.disabled = true;
-    formEl.querySelector("button").disabled = true;
+    resizeInput();
+    setInterfaceBusy(true);
+    const pendingMessage = appendMessage("assistant", { text: "Thinking..." });
+    pendingMessage.classList.add("message-pending");
 
     try {
-      await sendQuery(query);
+      const response = await sendQuery(query);
+      pendingMessage.remove();
+      appendMessage("assistant", response);
+      try {
+        await refreshConversationList();
+      } catch (error) {
+        setHistoryStatus(error.message, true);
+      }
     } catch {
+      pendingMessage.remove();
       appendMessage("assistant", {
         text: "Network error: could not reach the orchestrator.",
         isError: true,
       });
     } finally {
-      inputEl.disabled = false;
-      formEl.querySelector("button").disabled = false;
+      setInterfaceBusy(false);
       inputEl.focus();
     }
   });
 
   inputEl.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" && !event.shiftKey) {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
       formEl.requestSubmit();
     }
+  });
+
+  inputEl.addEventListener("input", resizeInput);
+
+  newChatButtonEl.addEventListener("click", createConversation);
+  historyToggleEl.addEventListener("click", () => {
+    const isOpen = appShellEl.classList.toggle("history-open");
+    historyToggleEl.setAttribute("aria-expanded", String(isOpen));
+    historyBackdropEl.hidden = !isOpen;
+  });
+  historyBackdropEl.addEventListener("click", closeHistoryDrawer);
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeHistoryDrawer();
   });
 
   async function uploadFile(file, category, fileInputEl) {
@@ -234,4 +451,6 @@
       uploadFile(file, fileInputEl.dataset.category, fileInputEl);
     });
   });
+
+  initializeConversationHistory();
 })();

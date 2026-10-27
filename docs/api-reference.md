@@ -129,10 +129,13 @@ Builds the Flask application serving the chat UI. Routes:
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/` | GET | Serves the chat UI page |
-| `/api/chat` | POST | Accepts `{"query": str}`, runs one turn via `main.run_turn`, and returns `{"formatted": str}` on success, `{"raw": str, "error": str}` when the model's reply isn't valid JSON, or `{"error": str}` with a 4xx/5xx status on a bad request or upstream failure |
+| `/api/conversations` | GET | Lists saved conversations by their first user query and update date, and returns the active conversation ID; system prompts and message bodies are not included |
+| `/api/conversations` | POST | Creates and activates a new conversation with the configured system prompt |
+| `/api/conversations/<conversation_id>/activate` | POST | Activates a saved conversation and returns its user/assistant messages, excluding the system prompt |
+| `/api/chat` | POST | Accepts `{"query": str}`, runs one turn via `main.run_turn`, and returns `{"formatted": str}` on success, `{"raw": str, "error": str}` when the model's reply isn't valid JSON, or `{"error": str}` with a 4xx/5xx status on a bad request or upstream failure. The raw model response is also printed to server stdout; the dashboard displays structured content or an error, not raw JSON. |
 | `/api/upload` | POST | Accepts a multipart `file` field, sanitizes the filename with `werkzeug.utils.secure_filename`, prefixes it with a short id to avoid collisions, and saves it under `assets/`. Returns `{"filename": str}` |
 
-Turns are serialized with a lock so chat-file writes and turn numbering stay consistent across concurrent requests; the web UI serves one operator at a time, mirroring the single-session REPL it replaces.
+Conversation changes and turns are serialized with a lock so the active chat cannot change during a model request. The web UI serves one shared operator session; it does not provide authentication or per-user conversation isolation.
 
 ## `chat_history`
 

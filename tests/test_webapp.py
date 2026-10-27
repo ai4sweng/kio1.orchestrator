@@ -94,6 +94,9 @@ class TestIndexRoute:
 
         assert response.status_code == 200
         assert b"<html" in response.data
+        assert b"What can I help with?" in response.data
+        assert b"test-model" in response.data
+        assert b'aria-label="Conversation"' in response.data
 
 
 class TestChatRoute:
@@ -101,16 +104,21 @@ class TestChatRoute:
 
     @patch("main.urllib.request.urlopen")
     def test_returns_formatted_json(
-        self, mock_urlopen: MagicMock, client: FlaskClient
+        self,
+        mock_urlopen: MagicMock,
+        client: FlaskClient,
+        capsys: pytest.CaptureFixture[str],
     ) -> None:
         """Verify the model's JSON reply comes back pretty-printed and unchanged."""
-        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
+        raw_response = json.dumps(SAMPLE_PLAN)
+        mock_urlopen.return_value = _mock_ollama_response(raw_response)
 
         response = client.post("/api/chat", json={"query": "build battery firmware"})
 
         assert response.status_code == 200
         data = response.get_json()
         assert json.loads(data["formatted"]) == SAMPLE_PLAN
+        assert raw_response in capsys.readouterr().out
 
     @patch("main.urllib.request.urlopen")
     def test_chat_history_is_persisted(
@@ -182,6 +190,74 @@ class TestChatRoute:
 
         assert response.status_code == 502
         assert "error" in response.get_json()
+
+
+class TestConversationRoutes:
+    """Tests for creating, listing, and activating persisted chats."""
+
+    @patch("main.urllib.request.urlopen")
+    def test_create_and_activate_conversation_keeps_histories_separate(
+        self,
+        mock_urlopen: MagicMock,
+        client: FlaskClient,
+        tmp_path: Path,
+    ) -> None:
+        mock_urlopen.return_value = _mock_ollama_response(json.dumps(SAMPLE_PLAN))
+
+        client.post("/api/chat", json={"query": "first conversation"})
+        original = client.get("/api/conversations").get_json()
+        original_id = original["active_id"]
+        original_summary = next(
+            item for item in original["conversations"] if item["id"] == original_id
+        )
+        assert original_summary["title"] == "first conversation"
+        assert "messages" not in original_summary
+
+        created = client.post("/api/conversations")
+        assert created.status_code == 201
+        new_id = created.get_json()["id"]
+        assert new_id != original_id
+        assert created.get_json()["messages"] == []
+
+        new_listing = client.get("/api/conversations").get_json()
+        assert new_listing["active_id"] == new_id
+        assert len(new_listing["conversations"]) == 2
+        assert all("system" not in item for item in new_listing["conversations"])
+
+        opened = client.post(f"/api/conversations/{original_id}/activate")
+        assert opened.status_code == 200
+        restored_messages = opened.get_json()["messages"]
+        assert [message["role"] for message in restored_messages] == [
+            "user",
+            "assistant",
+        ]
+        assert restored_messages[0]["content"] == "first conversation"
+
+        client.post("/api/chat", json={"query": "continue first conversation"})
+        original_file = tmp_path / "chats" / f"chat_{original_id}.jsonl"
+        new_file = tmp_path / "chats" / f"chat_{new_id}.jsonl"
+        original_messages = [
+            json.loads(line) for line in original_file.read_text().splitlines()
+        ]
+        new_messages = [json.loads(line) for line in new_file.read_text().splitlines()]
+
+        assert [
+            message["content"]
+            for message in original_messages
+            if message["role"] == "user"
+        ] == [
+            "first conversation",
+            "continue first conversation",
+        ]
+        assert [message["role"] for message in new_messages] == ["system"]
+
+    def test_activate_rejects_invalid_conversation_id(
+        self, client: FlaskClient
+    ) -> None:
+        response = client.post("/api/conversations/not-a-chat/activate")
+
+        assert response.status_code == 404
+        assert response.get_json() == {"error": "Conversation not found."}
 
 
 class TestUploadRoute:

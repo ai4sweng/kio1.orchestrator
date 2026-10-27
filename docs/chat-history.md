@@ -2,7 +2,7 @@
 
 ## Overview
 
-Each orchestrator session creates a JSONL (JSON Lines) file in the `chats/` directory. Every line is a self-contained JSON object representing one message.
+Each conversation creates a JSONL (JSON Lines) file in the configured chat directory. Every line is a self-contained JSON object representing one message. The initial conversation is created at startup; additional conversations can be created from the web UI.
 
 ## File Naming
 
@@ -12,7 +12,7 @@ chat_<YYYYMMDD>_<HHMMSS>_<8-char-uuid>.jsonl
 
 Example: `chat_20260724_101706_5dd461f5.jsonl`
 
-The id is generated once per session by `session_logger.generate_session_id()` and shared with that session's log file, so `chats/chat_<id>.jsonl` and `logs/log_<id>.log` describe the same run. A session that fails during startup produces a log file with no matching chat file.
+The id follows the `session_logger.generate_session_id()` format. The initial conversation ID is also used for the startup log file. Conversations created in the browser have their own IDs but do not create separate log files. A session that fails during startup can produce a log file with no matching chat file.
 
 ## Message Schema
 
@@ -26,7 +26,7 @@ Each line follows the format:
 |------|-------------|
 | `system` | System prompt (always line 1) |
 | `user` | User input |
-| `assistant` | Model response (JSON workflow plan) |
+| `assistant` | Model response, commonly a JSON workflow plan |
 
 ## Example File
 
@@ -40,10 +40,12 @@ Each line follows the format:
 
 ## Behavior
 
-- A new file is created at the start of each session.
+- A new file is created at startup and whenever the user selects **New chat**.
 - The system prompt is written as the first line on file creation.
 - Messages are appended after each successful exchange.
-- On conversation reload, the system prompt line is excluded from the message list sent to the model (it is injected separately in the API payload).
-- Files are never modified or deleted by the application; they accumulate as an audit trail.
-- The session's log file (`logs/log_<same-id>.log`) records timing, token counts, and errors for the same exchanges.
+- The history sidebar titles chats from their first user message and lets the user reopen them.
+- On activation, user and assistant messages are restored; the system prompt is excluded from the browser response and supplied separately to the model.
+- The active conversation is append-only. The application does not edit or delete saved conversations.
+- The initial session's log file (`logs/log_<same-id>.log`) records timing, token counts, and errors. Browser-created conversation IDs do not have paired log files.
+- Conversation files are shared within the current single-operator app instance; they are not partitioned by user identity.
 

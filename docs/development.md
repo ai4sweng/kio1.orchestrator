@@ -27,11 +27,11 @@ ollama pull ministral-3:8b
 
 ```
 main.py              - Entry point (startup, run_turn() turn logic, Ollama request/response handling)
-webapp.py            - Flask web UI (chat and file-upload routes)
+webapp.py            - Flask web UI (saved conversations, chat, and file-upload routes)
 config_loader.py     - Configuration loading
 prompt_loader.py     - System prompt file reader
 chat_history.py      - JSONL conversation persistence
-formatter.py         - JSON pretty-printing
+formatter.py         - JSON normalization for structured browser rendering
 session_logger.py    - Per-session log setup and duration measurement
 telemetry.py         - OpenTelemetry tracing and metrics
 templates/, static/  - Chat UI markup, styling, and client-side rendering

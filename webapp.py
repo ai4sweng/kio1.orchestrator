@@ -4,18 +4,22 @@ Replaces the terminal REPL in `main.py` with a browser UI. The UI also
 accepts model/dataset/file uploads, saved under `assets/<category>/`.
 """
 
+import json
 import logging
+import re
 import threading
 import uuid
+from datetime import datetime, timezone
 from formatter import format_json
 from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request
 from werkzeug.utils import secure_filename
 
+from chat_history import create_chat_file, load_messages
 from config_loader import Config
 from main import run_turn
-from session_logger import measure_duration
+from session_logger import generate_session_id, measure_duration
 
 logger = logging.getLogger("webapp")
 
@@ -34,6 +38,47 @@ UPLOAD_SUBDIRECTORIES = {
     "file": "files",
 }
 DEFAULT_UPLOAD_CATEGORY = "file"
+CONVERSATION_ID_PATTERN = re.compile(r"\d{8}_\d{6}_[0-9a-f]{8}\Z")
+
+
+def _conversation_path(chat_directory: Path, conversation_id: str) -> Path | None:
+    """Return an existing, valid conversation path without following symlinks."""
+    if not CONVERSATION_ID_PATTERN.fullmatch(conversation_id):
+        return None
+
+    path = chat_directory / f"chat_{conversation_id}.jsonl"
+    if path.is_symlink() or not path.is_file():
+        return None
+    return path
+
+
+def _conversation_summary(chat_file: Path) -> dict[str, str | int]:
+    """Build a safe, content-limited summary for the history selector."""
+    first_query = ""
+    with chat_file.open(encoding="utf-8") as history_file:
+        for line in history_file:
+            try:
+                message = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if not isinstance(message, dict) or message.get("role") != "user":
+                continue
+            content = message.get("content", "")
+            if isinstance(content, str):
+                first_query = content
+            break
+
+    title = " ".join(first_query.split()) or "New conversation"
+    if len(title) > 72:
+        title = f"{title[:69].rstrip()}..."
+
+    return {
+        "id": chat_file.stem.removeprefix("chat_"),
+        "title": title,
+        "updated_at": datetime.fromtimestamp(
+            chat_file.stat().st_mtime, timezone.utc
+        ).isoformat(),
+    }
 
 
 class _ChatSession:
@@ -84,7 +129,69 @@ def create_app(
 
     @app.get("/")
     def index() -> str:
-        return render_template("index.html")
+        return render_template("index.html", model_name=session.config.model)
+
+    @app.get("/api/conversations")
+    def conversations() -> Response:
+        summaries: list[dict[str, str | int]] = []
+        with session.lock:
+            for chat_file in session.chat_file.parent.glob("chat_*.jsonl"):
+                conversation_id = chat_file.stem.removeprefix("chat_")
+                if (
+                    _conversation_path(session.chat_file.parent, conversation_id)
+                    is None
+                ):
+                    continue
+                try:
+                    summaries.append(_conversation_summary(chat_file))
+                except (OSError, ValueError):
+                    logger.warning(
+                        "Skipping unreadable conversation: id=%s", conversation_id
+                    )
+
+            summaries.sort(key=lambda item: str(item["updated_at"]), reverse=True)
+            active_id = session.chat_file.stem.removeprefix("chat_")
+
+        return jsonify({"active_id": active_id, "conversations": summaries})
+
+    @app.post("/api/conversations")
+    def create_conversation() -> tuple[Response, int] | Response:
+        with session.lock:
+            conversation_id = generate_session_id()
+            try:
+                chat_file = create_chat_file(
+                    str(session.chat_file.parent),
+                    session.system_prompt,
+                    conversation_id,
+                )
+            except OSError:
+                logger.exception("Could not create conversation")
+                return jsonify({"error": "Could not create a new conversation."}), 500
+
+            session.chat_file = chat_file
+            session.session_id = conversation_id
+            session.turn = 0
+
+        return jsonify({"id": conversation_id, "messages": []}), 201
+
+    @app.post("/api/conversations/<conversation_id>/activate")
+    def activate_conversation(conversation_id: str) -> tuple[Response, int] | Response:
+        with session.lock:
+            chat_file = _conversation_path(session.chat_file.parent, conversation_id)
+            if chat_file is None:
+                return jsonify({"error": "Conversation not found."}), 404
+
+            try:
+                messages = load_messages(chat_file)
+            except (OSError, ValueError):
+                logger.exception("Could not load conversation: id=%s", conversation_id)
+                return jsonify({"error": "Could not load the conversation."}), 500
+
+            session.chat_file = chat_file
+            session.session_id = conversation_id
+            session.turn = sum(message.get("role") == "user" for message in messages)
+
+        return jsonify({"id": conversation_id, "messages": messages})
 
     @app.post("/api/chat")
     def chat() -> tuple[Response, int] | Response:
@@ -116,6 +223,11 @@ def create_app(
                 return jsonify({"error": str(error)}), 502
 
         logger.info("Turn completed: turn=%d duration_ms=%d", turn, turn_elapsed())
+        print(
+            f"\n--- KIO1 raw response ({session.session_id}, turn {turn}) ---\n"
+            f"{content}\n--- end raw response ---\n",
+            flush=True,
+        )
 
         try:
             formatted = format_json(content)
