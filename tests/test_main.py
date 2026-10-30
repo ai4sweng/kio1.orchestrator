@@ -4,9 +4,11 @@ import json
 import logging
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
+from flask import Flask
 
 import main as main_module
 
@@ -95,6 +97,8 @@ class TestMainStartup:
         main_module.main()
 
         out = capsys.readouterr().out
+        log_file = next((tmp_path / "logs").glob("log_*.log"))
+        assert f"Session log: logs/{log_file.name}" in out
         assert "Loading Ollama model test-model..." in out
         assert "KIO1 Orchestrator web UI: http://127.0.0.1:5000" in out
         mock_run.assert_called_once()
@@ -102,6 +106,61 @@ class TestMainStartup:
         assert run_kwargs["host"] == "127.0.0.1"
         assert run_kwargs["port"] == 5000
         assert run_kwargs["debug"] is False
+
+    @patch("flask.Flask.run", autospec=True)
+    @patch("main.urllib.request.urlopen")
+    def test_query_diagnostics_are_written_to_session_log(
+        self,
+        mock_urlopen: MagicMock,
+        mock_run: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Verify query performance and plan metadata reach the real session file."""
+        plan = {
+            "workflow_id": "wf-file-log",
+            "execution_mode": "sequential",
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO7",
+                    "capability": "code_generation",
+                    "task": "Write service",
+                }
+            ],
+        }
+        mock_urlopen.side_effect = [
+            _mock_ollama_response(""),
+            _mock_ollama_response(json.dumps(plan)),
+        ]
+        write_config(tmp_path)
+        monkeypatch.chdir(tmp_path)
+
+        def serve(app: Flask, **options: Any) -> None:
+            """Submit a query while the normally blocking server is mocked.
+
+            Args:
+                app: Configured Flask application passed by the autospecced mock.
+                options: Server settings unused by the test client.
+
+            Returns:
+                No value; exercises the query route before server shutdown.
+            """
+            assert (
+                app.test_client()
+                .post("/api/chat", json={"query": "Build service"})
+                .status_code
+                == 200
+            )
+
+        mock_run.side_effect = serve
+        main_module.main()
+        log_file = next((tmp_path / "logs").glob("log_*.log"))
+        logs = log_file.read_text()
+        assert "Query processed:" in logs and "duration_ms=" in logs
+        assert "workflow_id='wf-file-log'" in logs and "dispatch=not_started" in logs
+        assert "agent_id='KIO7' capability='code_generation'" in logs
+        assert "input_tokens=" in logs and "output_tokens=" in logs
 
     @patch("flask.Flask.run")
     @patch("main.urllib.request.urlopen")

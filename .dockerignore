@@ -11,6 +11,7 @@ logs
 assets
 tasks
 config.json
+agents.json
 .env
 .env.*
 *.env

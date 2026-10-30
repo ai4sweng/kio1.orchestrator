@@ -1,3 +1,4 @@
+import ast
 import json
 import logging
 import re
@@ -18,6 +19,44 @@ from config_loader import Config, TelemetryConfig, load_config
 from main import extract_content, preload_model, send_request
 from prompt_loader import load_prompt
 from session_logger import generate_session_id, init_logger
+
+
+@pytest.mark.parametrize(
+    "module_path", sorted(Path(__file__).parent.parent.glob("*.py"))
+)
+def test_application_functions_document_inputs_and_outputs(module_path: Path) -> None:
+    """Keep every application function's inputs and outputs documented.
+
+    Args:
+        module_path: Application Python module selected by pytest.
+
+    Returns:
+        None. Fails when a function omits its docstring, arguments, or outputs.
+    """
+    tree = ast.parse(module_path.read_text(encoding="utf-8"))
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        docstring = ast.get_docstring(node) or ""
+        location = f"{module_path.name}:{node.lineno} {node.name}"
+        arguments = [
+            argument
+            for argument in [
+                *node.args.posonlyargs,
+                *node.args.args,
+                *node.args.kwonlyargs,
+            ]
+            if argument.arg not in {"self", "cls"}
+        ]
+        if arguments:
+            assert "Args:" in docstring, f"Missing input description: {location}"
+        assert (
+            "Returns:" in docstring or "Yields:" in docstring
+        ), f"Missing output description: {location}"
+        for argument in arguments:
+            assert (
+                f"{argument.arg}:" in docstring
+            ), f"Undocumented {argument.arg}: {location}"
 
 
 def make_config(

@@ -1,5 +1,54 @@
 # Observability
 
+## Local Debugging Logs
+
+Start KIO1 with `python3 main.py`. Startup prints the session log path, for example
+`Session log: logs/log_20261030_120000_a1b2c3d4.log`. Each server run uses one log
+file; creating or switching browser conversations does not create another log.
+File records are flushed as they are written. No OpenTelemetry setup is required.
+
+Follow the newest file while submitting queries:
+
+```bash
+tail -f "$(ls -t logs/log_*.log | head -n 1)"
+```
+
+Filter existing logs for planning and execution diagnostics:
+
+```bash
+rg 'Query processed|Workflow plan|Workflow completed|Workflow rejected|Task outcome unknown|Task blocked' logs/log_*.log
+```
+
+Each line has a UTC timestamp, server session ID, level, logger name, and message.
+Use `conversation_id` and `turn` to find a query, then `workflow_id` to follow its
+execution. These are illustrative messages (timings are examples):
+
+```text
+Query processed: conversation_id=20261030_120000_a1b2c3d4 turn=1 status=succeeded duration_ms=1420 format_duration_ms=1 response_type=workflow_plan
+Workflow plan generated: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' execution_mode='sequential' step_count=2 dispatch=not_started
+Workflow plan step: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' step_id='s1' agent_id='KIO7' capability='code_generation' depends_on=[]
+Workflow started: workflow_id=wf-123 execution_mode=sequential step_count=2 validation_duration_ms=1
+Task dispatch finished: workflow_id=wf-123 step_id=s1 agent_id=KIO7 status=succeeded duration_ms=230 http_status=200 request_bytes=510 response_bytes=320
+Workflow completed: workflow_id=wf-123 status=succeeded duration_ms=451 step_count=2 succeeded=2 failed=0 unknown=0 blocked=0
+```
+
+- **After a query:** `Turn completed` measures inference/history processing; `Query processed` adds formatting and reports total processing time, excluding time waiting for the chat-session lock. Existing `Response received` messages include model request duration, input/output tokens, and tokens per second.
+- **Generation is not execution:** generated plans are logged as metadata, not certified valid plans. `dispatch=not_started` means this query did not send tasks. Approve **Run workflow** to obtain execution logs.
+- **During execution:** validation timing, ready batches, task IDs, HTTP status, payload byte counts, individual durations, and workflow totals are recorded. Task duration is round-trip wall time, not isolated container CPU time. Parallel task durations overlap, so their sum can exceed the workflow duration.
+- **When something fails:** `Turn failed`, `Response formatting failed`, `Workflow rejected`, `Task outcome unknown`, and `Task blocked` identify the stage. Unknown outcomes include `phase` (`connect`, `http_status`, `read_response`, `parse_response`, or `validate_response`) and exception type. A timeout does not prove that the agent did not execute the task. Reconcile with that container before retrying; KIO1 does not automatically retry.
+- **Privacy and retention:** new INFO summaries omit task text, input data, credentials, and container response bodies. Existing DEBUG-level Ollama request/response logging can contain conversation content. Treat log files as sensitive, redact before sharing, and manage retention; files are not rotated.
+- **Docker:** with `-v "$PWD/logs:/app/logs"`, the same files are available in the host's `logs/` directory. Only ERROR-level logging and explicit prints go to the terminal, so `docker logs` alone does not show all diagnostics.
+
+These timings measure latency, not plan quality, energy use, or container resource usage. Restart KIO1 after updating application code to enable new log messages.
+
+### Terminal JSON Output
+
+After inference, stdout prints the user query, raw LLM response, and formatted workflow JSON in labeled blocks. During **Run workflow**, each outgoing task prints a **KIO1 agent payload JSON** block containing the actual JSON request body, including dependency results. A generated plan is not the same as an agent task payload: dependent payloads cannot be finalized until prerequisites finish. Printing a payload means delivery is being attempted, not that it succeeded; check the session log for its outcome.
+
+Payload blocks are explicit terminal prints, not additions to the metadata-only file-log summaries. They are also visible through `docker logs`. Authorization headers are excluded, but queries and task data are not redacted. Treat terminal output as sensitive and restart KIO1 after changing application code.
+
+## OpenTelemetry
+
 KIO1 uses OpenTelemetry to produce distributed traces and application metrics. Telemetry is exported over OTLP/HTTP to the shared AI4SWENG observability platform, which stores traces in Tempo, metrics in VictoriaMetrics, and visualizes both in Grafana.
 
 Telemetry is disabled by default, so the orchestrator remains usable without any observability infrastructure or network access to the collector.

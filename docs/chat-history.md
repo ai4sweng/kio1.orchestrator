@@ -45,7 +45,10 @@ Each line follows the format:
 - Messages are appended after each successful exchange.
 - The history sidebar titles chats from their first user message and lets the user reopen them.
 - On activation, user and assistant messages are restored; the system prompt is excluded from the browser response and supplied separately to the model.
-- The active conversation is append-only. The application does not edit or delete saved conversations.
+- Messages are append-only until a conversation is deleted using its trash icon
+	and confirmation. Deletion removes that conversation's JSONL file permanently.
+	Deleting the active conversation creates and activates a new empty one first.
+	Uploaded files, logs, and work already sent to containers are unaffected.
 - The initial session's log file (`logs/log_<same-id>.log`) records timing, token counts, and errors. Browser-created conversation IDs do not have paired log files.
 - Conversation files are shared within the current single-operator app instance; they are not partitioned by user identity.
 

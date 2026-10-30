@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <div id="app-shell" class="app-shell">
+  <div id="app-shell" class="app-shell" data-workflow-enabled="{{ 'true' if workflow_enabled else 'false' }}">
     <aside id="history-sidebar" class="history-sidebar" aria-label="Conversation history">
       <button id="new-chat-button" class="new-chat-button" type="button">
         <span class="new-chat-plus" aria-hidden="true">+</span>

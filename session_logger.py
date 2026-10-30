@@ -10,6 +10,7 @@ from pathlib import Path
 def generate_session_id() -> str:
     """Generate a timestamp+uuid id shared by the log file and chat file.
 
+    Takes no arguments; uses the current UTC time and a random UUID suffix.
     The timestamp is UTC, matching the UTC timestamps on every log line.
 
     Returns:
@@ -62,6 +63,8 @@ def init_logger(log_directory: str, session_id: str) -> logging.Logger:
 @contextmanager
 def measure_duration() -> Iterator[Callable[[], int]]:
     """Measure the wall-clock duration of a block.
+
+    Takes no arguments; captures the monotonic performance counter on entry.
 
     Yields:
         A callable returning the elapsed time in whole milliseconds.

@@ -52,9 +52,7 @@ def preload_model(config: Config) -> None:
         "model": config.model,
         "messages": [],
         "keep_alive": config.keep_alive,
-        "options": {
-            "num_ctx": config.context_window_size,
-        },
+        "options": {"num_ctx": config.context_window_size},
     }
 
     request_data = json.dumps(payload).encode("utf-8")
@@ -218,9 +216,7 @@ def run_turn(
             temperature=config.temperature,
         ):
             response = send_request(
-                config=config,
-                system_prompt=system_prompt,
-                messages=messages,
+                config=config, system_prompt=system_prompt, messages=messages
             )
         content = extract_content(response)
 
@@ -231,10 +227,21 @@ def run_turn(
 
 
 def main() -> None:
-    """Load configuration, preload the model, and serve the web UI."""
+    """Load configuration, preload the model, and serve the web UI.
+
+    Args:
+        None. Reads config.json and KIO1 environment overrides at startup.
+
+    Returns:
+        None after the web server stops and telemetry is shut down.
+
+    Raises:
+        SystemExit: Startup fails; the process exits with status 1.
+    """
     try:
         session_id = generate_session_id()
         init_logger("logs", session_id)
+        print(f"Session log: logs/log_{session_id}.log")
         logger.info("Session started: session_id=%s", session_id)
 
         config = load_config()
@@ -292,23 +299,18 @@ def main() -> None:
     session_success = False
     with measure_duration() as session_elapsed:
         try:
-            # threaded=True: Werkzeug's dev server otherwise handles one
-            # request at a time, so a file upload would stall behind an
-            # in-flight (potentially slow) Ollama chat request.
+            # threaded=True: Werkzeug's dev server otherwise handles one request
+            # at a time, so a file upload would stall behind an in-flight
+            # (potentially slow) Ollama chat request.
             app.run(
                 host=host, port=port, debug=False, use_reloader=False, threaded=True
             )
             session_success = True
         finally:
             record_session_completed(
-                provider=PROVIDER_NAME,
-                model=config.model,
-                success=session_success,
+                provider=PROVIDER_NAME, model=config.model, success=session_success
             )
-            logger.info(
-                "Session ended: duration_ms=%d",
-                session_elapsed(),
-            )
+            logger.info("Session ended: duration_ms=%d", session_elapsed())
             shutdown_telemetry()
 
 

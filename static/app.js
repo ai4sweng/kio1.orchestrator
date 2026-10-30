@@ -21,7 +21,9 @@
     return value
       .replace(/&/g, "&amp;")
       .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;");
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
   }
 
   // Recognizes the KIO1 workflow-plan shape so it can be rendered as step
@@ -74,6 +76,9 @@
           <span class="plan-mode">${escapeHtml(plan.execution_mode)}</span>
         </div>
         <ol class="plan-steps">${stepsHtml}</ol>
+        ${appShellEl.dataset.workflowEnabled === "true"
+          ? `<button type="button" class="dispatch-plan" data-plan="${escapeHtml(JSON.stringify(plan))}">Run workflow</button>`
+          : ""}
       </div>
     `;
   }
@@ -198,6 +203,9 @@
     historySidebarEl.querySelectorAll("button").forEach((button) => {
       button.disabled = isBusy;
     });
+    messagesEl.querySelectorAll(".dispatch-plan").forEach((button) => {
+      button.disabled = isBusy;
+    });
   }
 
   async function fetchJson(url, options = {}) {
@@ -223,6 +231,8 @@
   function renderConversationList(conversations) {
     conversationListEl.replaceChildren();
     conversations.forEach((conversation) => {
+      const row = document.createElement("div");
+      row.className = "conversation-row";
       const button = document.createElement("button");
       button.type = "button";
       button.className = "conversation-item";
@@ -245,7 +255,21 @@
       button.addEventListener("click", () => {
         activateConversation(conversation.id);
       });
-      conversationListEl.appendChild(button);
+      const deleteButton = document.createElement("button");
+      deleteButton.type = "button";
+      deleteButton.className = "delete-conversation";
+      deleteButton.disabled = inputEl.disabled;
+      deleteButton.title = `Delete conversation: ${conversation.title}`;
+      deleteButton.setAttribute("aria-label", deleteButton.title);
+      const icon = document.createElement("img");
+      icon.src = "/static/trash-2.svg";
+      icon.alt = "";
+      icon.width = 18;
+      icon.height = 18;
+      deleteButton.appendChild(icon);
+      deleteButton.addEventListener("click", () => deleteConversation(conversation));
+      row.append(button, deleteButton);
+      conversationListEl.appendChild(row);
     });
   }
 
@@ -253,6 +277,27 @@
     const data = await fetchJson("/api/conversations");
     activeConversationId = data.active_id;
     renderConversationList(data.conversations);
+  }
+
+  async function deleteConversation(conversation) {
+    if (!window.confirm(`Permanently delete "${conversation.title}"?`)) return;
+    setInterfaceBusy(true);
+    setHistoryStatus("");
+    try {
+      const wasActive = conversation.id === activeConversationId;
+      const data = await fetchJson(
+        `/api/conversations/${encodeURIComponent(conversation.id)}`,
+        { method: "DELETE" },
+      );
+      activeConversationId = data.active_id;
+      if (wasActive) clearMessages();
+      await refreshConversationList();
+      setHistoryStatus("Conversation deleted.");
+    } catch (error) {
+      setHistoryStatus(error.message, true);
+    } finally {
+      setInterfaceBusy(false);
+    }
   }
 
   function closeHistoryDrawer() {
@@ -367,7 +412,9 @@
     inputEl.value = "";
     resizeInput();
     setInterfaceBusy(true);
-    const pendingMessage = appendMessage("assistant", { text: "Thinking..." });
+    const pendingMessage = appendMessage("assistant", {
+      html: '<span role="status" aria-label="Thinking">Thinking<span class="thinking-dots" aria-hidden="true"><span>.</span><span>.</span><span>.</span></span></span>',
+    });
     pendingMessage.classList.add("message-pending");
 
     try {
@@ -399,6 +446,28 @@
   });
 
   inputEl.addEventListener("input", resizeInput);
+
+  messagesEl.addEventListener("click", async (event) => {
+    const button = event.target.closest(".dispatch-plan");
+    if (!button || button.disabled || inputEl.disabled) return;
+    if (!window.confirm("Run this workflow on the configured agent containers? Tasks may change external systems.")) return;
+    setInterfaceBusy(true);
+    const pending = appendMessage("assistant", { text: "Running workflow..." });
+    try {
+      const result = await fetchJson("/api/workflows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approved: true, plan: JSON.parse(button.dataset.plan) }),
+      });
+      pending.remove();
+      appendMessage("assistant", { html: renderGenericJson(result) });
+    } catch (error) {
+      pending.remove();
+      appendMessage("assistant", { text: error.message, isError: true });
+    } finally {
+      setInterfaceBusy(false);
+    }
+  });
 
   newChatButtonEl.addEventListener("click", createConversation);
   historyToggleEl.addEventListener("click", () => {

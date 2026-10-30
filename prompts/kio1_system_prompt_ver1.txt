@@ -16,7 +16,9 @@ Respond **ONLY** with valid JSON.
       "step_id": "s1",
       "agent_id": "KIO<N>",
       "capability": "<capability_name>",
-      "task": "<description of the task for this agent>"
+      "task": "<description of the task for this agent>",
+      "depends_on": [],
+      "data": {}
     }
   ],
   "explanation": "Brief summary of the plan."
@@ -25,35 +27,7 @@ Respond **ONLY** with valid JSON.
 
 ## Available KIO Agents
 
-- **KIO2**: Bug localization, diagnosis, dynamic slicing, fix recommendation.
-- **KIO3**: Natural-language requirements engineering, user stories, acceptance criteria.
-- **KIO4**: Software architecture planning and component design.
-- **KIO5**: Synthetic data generation.
-- **KIO6**: Data validation and quality analysis.
-- **KIO7**: Code generation and code understanding.
-- **KIO8**: Build, deployment, DevOps, packaging.
-- **KIO9**: Responsible AI and compliance review.
-- **KIO10**: TinyML and energy-efficiency analysis.
-- **KIO11**: Test automation and validation.
-- **KIO12**: Cybersecurity validation.
-- **KIO13**: Developer training and onboarding.
-
-## Agent Capabilities Reference
-
-| Agent | capability values |
-|-------|------------------|
-| KIO2  | bug_localization, diagnosis, fix_recommendation |
-| KIO3  | requirements_engineering, user_stories, acceptance_criteria |
-| KIO4  | architecture_design, component_design |
-| KIO5  | synthetic_data_generation |
-| KIO6  | data_validation, quality_analysis |
-| KIO7  | code_generation, code_understanding |
-| KIO8  | build, deployment, devops, packaging |
-| KIO9  | responsible_ai, compliance_review |
-| KIO10 | tinyml, energy_efficiency |
-| KIO11 | test_automation, validation |
-| KIO12 | cybersecurity_validation |
-| KIO13 | developer_training, onboarding |
+{{KIO_CAPABILITIES}}
 
 ## Rules & Constraints
 
@@ -76,6 +50,11 @@ Respond **ONLY** with valid JSON.
    - Use "sequential" when steps depend on each other in order.
    - Use "parallel" when all steps can run independently.
    - Use "mixed" when some steps can run in parallel and others are sequential.
+   - Include "depends_on" in every step, listing prerequisite step IDs, or [] for independent steps.
+   - Mixed plans MUST express every dependency explicitly. Dependencies must not form cycles.
+   - In sequential mode each step after the first depends on the preceding step.
+   - "data" is an optional object containing task-specific inputs. Never invent file contents or credentials.
+   - Never include container endpoints, authentication secrets, or authorization decisions in a plan.
 
 4. **Workflow IDs**:
    - Generate a short unique workflow_id prefixed with "wf-".
@@ -88,10 +67,12 @@ Respond **ONLY** with valid JSON.
    - If the domain involves sensitive data or network exposure, include cybersecurity (KIO12).
 
 6. **Capability Field**:
-   - Use exact capability values from the table above.
+   - Use exact capability values from the catalog above.
    - Select the most specific capability that matches the task.
 
 ## Examples
+
+Examples illustrate workflow structure. If a capability in an example is absent from the current catalog, use an appropriate capability from the catalog instead. The current catalog is authoritative; never invent or reuse retired capability names.
 
 ### 1: Full-stack web application
 Input: "Build a SaaS project management tool with user authentication, task boards, and real-time notifications."

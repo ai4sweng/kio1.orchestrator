@@ -68,9 +68,13 @@ Raises `FileNotFoundError` if the file does not exist. Raises `KeyError` if a re
 
 ### `load_prompt(prompt_path) -> str`
 
-Reads and returns the stripped text content of a prompt file. Logs the load duration and character count.
+Reads and returns stripped prompt text, expanding `{{KIO_CAPABILITIES}}` from the shared catalog when present. Plain-text prompts remain supported. Logs the load duration and rendered character count.
 
-Raises `FileNotFoundError` if the file does not exist.
+Raises `FileNotFoundError` if the prompt file does not exist, or `ValueError` if a referenced capability catalog is invalid.
+
+### `load_capabilities(path=None) -> dict[str, AgentDefinition]`
+
+Reads agent descriptions and capability lists from the explicit path, then `KIO1_CAPABILITIES_PATH`, then the bundled `capabilities.json` (in that precedence order). Validates KIO2-KIO13 IDs, nonblank descriptions, and nonempty lists of unique capability names. Returns the shared catalog used by prompting, registry validation, and plan validation. Raises `ValueError` for unreadable or invalid files.
 
 ## `session_logger`
 
@@ -132,10 +136,16 @@ Builds the Flask application serving the chat UI. Routes:
 | `/api/conversations` | GET | Lists saved conversations by their first user query and update date, and returns the active conversation ID; system prompts and message bodies are not included |
 | `/api/conversations` | POST | Creates and activates a new conversation with the configured system prompt |
 | `/api/conversations/<conversation_id>/activate` | POST | Activates a saved conversation and returns its user/assistant messages, excluding the system prompt |
+| `/api/conversations/<conversation_id>` | DELETE | Deletes one conversation; returns `deleted_id` and `active_id`. Deleting the active chat creates an empty replacement. Invalid/missing IDs return 404; storage failures return 500. |
+| `/api/workflows` | POST | Accepts `{"approved": true, "plan": {...}}`; validates and dispatches tasks using `KIO1_AGENT_CONFIG`. Returns workflow/step outcomes. See the [container contract](workflow-contract.md) for error codes and limits. |
 | `/api/chat` | POST | Accepts `{"query": str}`, runs one turn via `main.run_turn`, and returns `{"formatted": str}` on success, `{"raw": str, "error": str}` when the model's reply isn't valid JSON, or `{"error": str}` with a 4xx/5xx status on a bad request or upstream failure. The raw model response is also printed to server stdout; the dashboard displays structured content or an error, not raw JSON. |
 | `/api/upload` | POST | Accepts a multipart `file` field, sanitizes the filename with `werkzeug.utils.secure_filename`, prefixes it with a short id to avoid collisions, and saves it under `assets/`. Returns `{"filename": str}` |
 
 Conversation changes and turns are serialized with a lock so the active chat cannot change during a model request. The web UI serves one shared operator session; it does not provide authentication or per-user conversation isolation.
+
+### Workflow Planner
+
+`workflow_planner.validate_plan(plan)` validates agent capabilities and acyclic dependencies and returns normalized steps. `load_agent_registry(path)` loads trusted HTTP routes and optional `token_env` names. `dispatch_workflow(plan, registry)` dispatches bounded batches, passes dependency results, and stops new tasks on failure or uncertainty. Endpoints in generated steps are rejected.
 
 ## `chat_history`
 

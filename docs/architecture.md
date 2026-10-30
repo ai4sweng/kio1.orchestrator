@@ -16,6 +16,8 @@ graph TD
     Main --> PromptLoader[prompt_loader.py]
     Main --> ChatHistory[chat_history.py]
     WebApp --> Formatter[formatter.py]
+    WebApp -->|explicit approval| Planner[workflow_planner.py]
+    Planner -->|trusted HTTP endpoints| Agents[KIO2-KIO13 containers]
     Main --> SessionLogger[session_logger.py]
     Main --> Telemetry[telemetry.py]
     Main -->|HTTP POST| Ollama[Ollama API :11434]
@@ -38,9 +40,11 @@ graph TD
 | `webapp.py` | Flask app: serves the chat UI, conversation history, `/api/chat`, and `/api/upload` routes |
 | `config_loader.py` | Loads and validates `config.json` into a typed `Config` dataclass |
 | `session_logger.py` | Per-session log file setup and duration measurement |
-| `prompt_loader.py` | Reads system prompt text from disk |
+| `prompt_loader.py` | Loads and validates the shared capability catalog and expands it into system prompt templates |
+| `capabilities.json` | Replaceable agent descriptions and capability names shared by prompting and workflow validation |
 | `chat_history.py` | Manages JSONL-based conversation persistence |
 | `formatter.py` | Pretty-prints JSON responses for structured rendering in the UI |
+| `workflow_planner.py` | Validates plans and dependencies; sends versioned tasks to trusted agent endpoints in bounded batches |
 | `telemetry.py` | Initializes OpenTelemetry, creates spans and metrics, records metadata, and flushes exporters |
 | `templates/`, `static/` | Chat UI markup, styling, and client-side JSON rendering |
 | `assets/` | Uploaded models/datasets/files, split into `models/`, `datasets/`, `files/` subfolders (git-ignored, not committed) |
@@ -59,6 +63,12 @@ graph TD
 9. Uploaded files sent to `POST /api/upload` are saved under `assets/<category>/` (`models/`, `datasets/`, or `files/`, chosen from a fixed mapping of the request's `category` field) with a sanitized, collision-resistant filename.
 10. Throughout startup and each turn, telemetry records privacy-safe request metadata, token usage, durations, traces, and metrics without prompt or response content.
 11. On shutdown, the session-completed metric is recorded and pending telemetry is flushed.
+
+## Optional Workflow Execution
+
+Generating a plan remains side-effect free. With `KIO1_AGENT_CONFIG` configured, an operator can approve dispatch through `POST /api/workflows`. The planner validates every step, resolves endpoints from a trusted JSON registry, and sends only ready tasks. Sequential plans inherit the prior step as a dependency; mixed plans must state dependencies explicitly. Up to four independent tasks run at once. Successful results flow to dependents; failed/unknown outcomes stop further scheduling without cancelling already-running tasks.
+
+Workflow execution has a separate process-local lock, so the app rejects a second execution with 409. It has no durable queue or restart recovery. Task results are returned to the browser but are not appended to conversation history. Workflow and HTTP task spans plus ID/status/duration logs omit payloads and credentials. See the [container contract](workflow-contract.md) for receiver requirements.
 
 ## Design Decisions
 

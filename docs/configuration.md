@@ -1,6 +1,40 @@
 # Configuration
 
-All application settings are stored in `config.json` at the project root.
+## Optional Agent Routing
+
+Container dispatch is disabled unless `KIO1_AGENT_CONFIG` points to a trusted registry file. Copy `agents.example.json`, replace endpoints with real task URLs, and keep only configured agents. This is separate from the Ollama configuration.
+
+```json
+{
+    "KIO7": {
+        "endpoint": "https://kio7.internal/tasks",
+        "token_env": "KIO7_BEARER_TOKEN"
+    }
+}
+```
+
+`token_env` is optional; when present its environment variable must be nonempty. Never store token values in the registry or model output. In Docker, mount the registry read-only and set `KIO1_AGENT_CONFIG` to its container path. All agents selected by a plan must have registry entries before any task can run. See the [container contract](workflow-contract.md) for scheduling and security details.
+
+## Shared Capability Catalog
+
+`capabilities.json` is the authoritative catalog for both prompt generation and plan validation. Replace its contents or point `KIO1_CAPABILITIES_PATH` to another file. The default path is resolved beside the Python modules, not the current working directory. Explicit paths passed to `load_capabilities(path)` take precedence over the environment variable.
+
+```json
+{
+    "KIO7": {
+        "description": "Code generation and code understanding.",
+        "capabilities": ["code_generation", "code_understanding"]
+    }
+}
+```
+
+The catalog must be a nonempty object containing KIO2-KIO13 entries. Each entry needs a nonblank description and a nonempty list of unique, nonblank capability strings. A replacement can contain a subset of agents; routing must reference only agents present in that catalog. Missing or invalid catalogs fail closed.
+
+The bundled prompt expands `{{KIO_CAPABILITIES}}` from this file. Include that placeholder in custom prompts rather than duplicating the catalog. Prompt examples are illustrative; the rendered catalog is authoritative. When changing agent roles, also review any task-ordering instructions specific to those roles.
+
+Restart KIO1 after catalog changes: prompts are loaded at startup. Existing plans must use the active capability names to execute. The bundled catalog is included in the Docker image; rebuild after editing it, or mount a replacement read-only and set `KIO1_CAPABILITIES_PATH` to its container path.
+
+Core model and telemetry settings are stored in `config.json` at the project root.
 
 ## Configuration File Reference
 

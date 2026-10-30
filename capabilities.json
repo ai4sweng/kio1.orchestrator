@@ -1,0 +1,14 @@
+{
+  "KIO2": {"description": "Bug localization, diagnosis, and fix recommendation.", "capabilities": ["bug_localization", "diagnosis", "fix_recommendation"]},
+  "KIO3": {"description": "Requirements engineering, user stories, and acceptance criteria.", "capabilities": ["requirements_engineering", "user_stories", "acceptance_criteria"]},
+  "KIO4": {"description": "Software architecture planning and component design.", "capabilities": ["architecture_design", "component_design"]},
+  "KIO5": {"description": "Synthetic data generation.", "capabilities": ["synthetic_data_generation"]},
+  "KIO6": {"description": "Data validation and quality analysis.", "capabilities": ["data_validation", "quality_analysis"]},
+  "KIO7": {"description": "Code generation and code understanding.", "capabilities": ["code_generation", "code_understanding"]},
+  "KIO8": {"description": "Build, deployment, DevOps, and packaging.", "capabilities": ["build", "deployment", "devops", "packaging"]},
+  "KIO9": {"description": "Responsible AI and compliance review.", "capabilities": ["responsible_ai", "compliance_review"]},
+  "KIO10": {"description": "TinyML and energy-efficiency analysis.", "capabilities": ["tinyml", "energy_efficiency"]},
+  "KIO11": {"description": "Test automation and validation.", "capabilities": ["test_automation", "validation"]},
+  "KIO12": {"description": "Cybersecurity validation.", "capabilities": ["cybersecurity_validation"]},
+  "KIO13": {"description": "Developer training and onboarding.", "capabilities": ["developer_training", "onboarding"]}
+}

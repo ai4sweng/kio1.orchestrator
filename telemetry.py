@@ -158,7 +158,14 @@ _kio_id: str = ""
 
 
 def _create_instruments(meter: Meter) -> _Instruments:
-    """Create all application metric instruments."""
+    """Create all application metric instruments.
+
+    Args:
+        meter: OpenTelemetry meter used to register counters and histograms.
+
+    Returns:
+        A collection containing the application's metric instruments.
+    """
 
     return _Instruments(
         sessions_started=meter.create_counter(
@@ -516,7 +523,15 @@ def _heartbeat_loop(
 
 
 def _start_heartbeat(instruments: _Instruments, kio_id: str) -> None:
-    """Start the background heartbeat thread, replacing any existing one."""
+    """Start the background heartbeat thread, replacing any existing one.
+
+    Args:
+        instruments: Instruments whose heartbeat counter the thread increments.
+        kio_id: Agent identifier attached to heartbeat data points.
+
+    Returns:
+        No value; stores and starts a new daemon thread and its stop event.
+    """
 
     global _heartbeat_thread
     global _heartbeat_stop_event
@@ -536,7 +551,13 @@ def _start_heartbeat(instruments: _Instruments, kio_id: str) -> None:
 
 
 def _stop_heartbeat() -> None:
-    """Signal the heartbeat thread to stop and wait briefly for it to exit."""
+    """Signal the heartbeat thread to stop and wait briefly for it to exit.
+
+    Takes no arguments; uses the global heartbeat thread and stop event.
+
+    Returns:
+        No value; clears the stored thread and stop-event references.
+    """
 
     global _heartbeat_thread
     global _heartbeat_stop_event
@@ -552,7 +573,13 @@ def _stop_heartbeat() -> None:
 
 
 def shutdown_telemetry() -> None:
-    """Flush pending telemetry and shut down exporters safely."""
+    """Flush pending telemetry and shut down exporters safely.
+
+    Takes no arguments; uses the active global providers and heartbeat thread.
+
+    Returns:
+        No value; shuts down providers, logging failures without skipping cleanup.
+    """
 
     _stop_heartbeat()
 
@@ -642,7 +669,15 @@ def _record_kpi_snapshot(is_error: bool) -> None:
 
 
 def _model_attributes(provider: str, model: str) -> dict[str, AttributeValue]:
-    """Return low-cardinality provider and model attributes."""
+    """Return low-cardinality provider and model attributes.
+
+    Args:
+        provider: Model provider name used as a metric and trace label.
+        model: Configured model identifier.
+
+    Returns:
+        A dictionary containing provider-name and request-model attributes.
+    """
 
     return {
         "gen_ai.provider.name": provider,
@@ -651,7 +686,15 @@ def _model_attributes(provider: str, model: str) -> dict[str, AttributeValue]:
 
 
 def _mark_span_error(span: Span, error: BaseException) -> None:
-    """Mark a span as failed without exporting the exception message."""
+    """Mark a span as failed without exporting the exception message.
+
+    Args:
+        span: Span to mark with error status.
+        error: Exception whose type, but not message or stack, may be exported.
+
+    Returns:
+        No value; updates the span's error.type attribute and status in place.
+    """
 
     span.set_attribute("error.type", type(error).__name__)
     span.set_status(Status(StatusCode.ERROR))
@@ -664,7 +707,16 @@ def trace_operation(
     *,
     kind: SpanKind = SpanKind.INTERNAL,
 ) -> Iterator[Span]:
-    """Create a span and attach privacy-safe error information."""
+    """Create a span and attach privacy-safe error information.
+
+    Args:
+        name: Operation name used for the span.
+        attributes: Optional privacy-safe span attributes.
+        kind: OpenTelemetry span kind, defaulting to an internal operation.
+
+    Yields:
+        The active span; escaping exceptions mark it as failed and are reraised.
+    """
 
     with _tracer.start_as_current_span(
         name,
@@ -688,7 +740,17 @@ def trace_turn(
     provider: str,
     model: str,
 ) -> Iterator[Span]:
-    """Trace and measure one complete user turn."""
+    """Trace and measure one complete user turn.
+
+    Args:
+        session_id: Conversation identifier recorded only on the span.
+        turn_number: One-based turn index.
+        provider: Model provider name.
+        model: Configured model identifier.
+
+    Yields:
+        The active turn span. On exit, records duration and success/error metrics.
+    """
 
     started_at = perf_counter()
     status = "success"
@@ -743,12 +805,16 @@ def trace_turn(
 
 
 @contextmanager
-def trace_provider_preload(
-    *,
-    provider: str,
-    model: str,
-) -> Iterator[Span]:
-    """Trace and measure model preload or provider validation."""
+def trace_provider_preload(*, provider: str, model: str) -> Iterator[Span]:
+    """Trace and measure model preload or provider validation.
+
+    Args:
+        provider: Model provider name.
+        model: Model identifier being preloaded or validated.
+
+    Yields:
+        The active preload span; completion records duration and status metrics.
+    """
 
     started_at = perf_counter()
     status = "success"
@@ -789,7 +855,20 @@ def trace_gen_ai_request(
     max_output_tokens: int,
     temperature: float,
 ) -> Iterator[Span]:
-    """Trace and measure one non-streaming model request."""
+    """Trace and measure one non-streaming model request.
+
+    Args:
+        provider: Model provider name.
+        model: Requested model identifier.
+        session_id: Conversation identifier used for trace correlation.
+        turn_number: One-based turn index.
+        message_count: Number of messages sent, including the system prompt.
+        max_output_tokens: Requested output-token limit.
+        temperature: Requested sampling temperature.
+
+    Yields:
+        The active client span; completion records request duration and errors.
+    """
 
     started_at = perf_counter()
     error_type: str | None = None
@@ -850,7 +929,22 @@ def record_gen_ai_response(
     truncated: bool = False,
     truncation_reason: str = "unknown",
 ) -> None:
-    """Record model response metadata without recording response content."""
+    """Record model response metadata without recording response content.
+
+    Args:
+        provider: Provider label used for metrics and estimated token cost.
+        request_model: Requested model identifier.
+        input_tokens: Nonnegative prompt-token count, or None when unavailable.
+        output_tokens: Nonnegative generated-token count, or None when unavailable.
+        response_model: Optional model identifier reported by the provider.
+        response_id: Optional response identifier, truncated to 256 characters.
+        finish_reason: Optional provider-reported completion reason.
+        truncated: Whether generation stopped before completing the response.
+        truncation_reason: Known truncation category; other values become unknown.
+
+    Returns:
+        No value; updates the active span and enabled usage/cost/truncation metrics.
+    """
 
     span = trace.get_current_span()
 
@@ -937,7 +1031,15 @@ def record_gen_ai_response(
 
 
 def record_session_started(*, provider: str, model: str) -> None:
-    """Increment the session-started counter."""
+    """Increment the session-started counter.
+
+    Args:
+        provider: Model provider label.
+        model: Configured model identifier.
+
+    Returns:
+        No value; increments started and active-session counters when enabled.
+    """
 
     instruments = _instruments
     if instruments is not None:
@@ -957,7 +1059,16 @@ def record_session_completed(
     model: str,
     success: bool,
 ) -> None:
-    """Increment the session-completed counter."""
+    """Increment the session-completed counter.
+
+    Args:
+        provider: Model provider label.
+        model: Configured model identifier.
+        success: Whether the session shut down without a serving error.
+
+    Returns:
+        No value; records completion status and decrements active-session count.
+    """
 
     instruments = _instruments
     if instruments is not None:
@@ -968,7 +1079,14 @@ def record_session_completed(
 
 
 def record_format_fallback() -> None:
-    """Record use of the Python-literal response-format fallback."""
+    """Record use of the Python-literal response-format fallback.
+
+    Takes no arguments; uses the active span and configured metric instruments.
+
+    Returns:
+        None. Records a fallback counter increment and an event on the active
+        span when their respective telemetry components are enabled.
+    """
 
     instruments = _instruments
     if instruments is not None:
@@ -985,7 +1103,17 @@ def record_workflow_plan(
     execution_mode: str,
     step_count: int,
 ) -> None:
-    """Record the structure of a successfully parsed workflow plan."""
+    """Record the structure of a successfully parsed workflow plan.
+
+    Args:
+        workflow_id: Optional identifier, recorded only on spans and truncated
+            to 128 characters.
+        execution_mode: Plan mode; unrecognized values are labeled unknown.
+        step_count: Number of steps in the parsed plan.
+
+    Returns:
+        No value; records plan-count/size metrics and privacy-safe span attributes.
+    """
 
     normalized_mode = (
         execution_mode if execution_mode in _ALLOWED_EXECUTION_MODES else "unknown"
@@ -994,20 +1122,14 @@ def record_workflow_plan(
     instruments = _instruments
     if instruments is not None:
         metric_attributes: dict[str, AttributeValue] = {
-            "kio1.workflow.execution_mode": normalized_mode,
+            "kio1.workflow.execution_mode": normalized_mode
         }
         instruments.workflow_plans.add(1, metric_attributes)
-        instruments.workflow_step_count.record(
-            step_count,
-            metric_attributes,
-        )
+        instruments.workflow_step_count.record(step_count, metric_attributes)
 
     span = trace.get_current_span()
     if span.is_recording():
-        span.set_attribute(
-            "kio1.workflow.execution_mode",
-            normalized_mode,
-        )
+        span.set_attribute("kio1.workflow.execution_mode", normalized_mode)
         span.set_attribute("kio1.workflow.step_count", step_count)
 
         if workflow_id:

@@ -1,6 +1,7 @@
 """Tests for the Flask web UI: chat turns, JSON formatting, and file uploads."""
 
 import json
+import logging
 from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -102,6 +103,118 @@ class TestIndexRoute:
 class TestChatRoute:
     """Tests for `POST /api/chat`."""
 
+    @patch("webapp.run_turn")
+    def test_query_logs_plan_metadata_without_task_data(
+        self, run_turn: MagicMock, client: FlaskClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Log query timing and agent assignments without dumping plan inputs."""
+        plan = {
+            **SAMPLE_PLAN,
+            "steps": [
+                {
+                    "step_id": "s1",
+                    "agent_id": "KIO10",
+                    "capability": "tinyml",
+                    "task": "private-task-text",
+                    "data": {"token": "private-data-value"},
+                    "depends_on": [],
+                }
+            ],
+        }
+        run_turn.return_value = json.dumps(plan)
+        conversation_id = client.get("/api/conversations").get_json()["active_id"]
+        with caplog.at_level(logging.INFO, logger="webapp"):
+            assert (
+                client.post(
+                    "/api/chat", json={"query": "private-user-query"}
+                ).status_code
+                == 200
+            )
+        logs = "\n".join(
+            record.getMessage() for record in caplog.records if record.name == "webapp"
+        )
+        assert f"conversation_id={conversation_id} turn=1" in logs
+        assert "Query processed:" in logs and "duration_ms=" in logs
+        assert "format_duration_ms=" in logs and "response_type=workflow_plan" in logs
+        assert "workflow_id='wf-e2e01'" in logs and "step_count=1" in logs
+        assert "dispatch=not_started" in logs
+        assert "agent_id='KIO10' capability='tinyml'" in logs
+        assert all(
+            secret not in logs
+            for secret in (
+                "private-task-text",
+                "private-data-value",
+                "private-user-query",
+            )
+        )
+
+    @pytest.mark.parametrize(
+        "content", ['{"answer": 42}', "[1, 2]", '{"steps": [null, 1]}']
+    )
+    @patch("webapp.run_turn")
+    def test_query_logging_preserves_generic_and_partial_json(
+        self,
+        run_turn: MagicMock,
+        client: FlaskClient,
+        caplog: pytest.LogCaptureFixture,
+        content: str,
+    ) -> None:
+        """Diagnostic logging must not reject JSON that is only being displayed."""
+        run_turn.return_value = content
+        with caplog.at_level(logging.INFO, logger="webapp"):
+            response = client.post("/api/chat", json={"query": "show JSON"})
+        assert response.status_code == 200
+        assert json.loads(response.get_json()["formatted"]) == json.loads(content)
+        assert "Query processed:" in caplog.text
+
+    @patch("webapp.run_turn")
+    def test_malformed_metadata_does_not_dump_nested_inputs(
+        self, run_turn: MagicMock, client: FlaskClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Keep nested data and control characters out of diagnostic fields."""
+        private = {"secret": "private-nested-value"}
+        run_turn.return_value = json.dumps(
+            {
+                "workflow_id": private,
+                "execution_mode": private,
+                "steps": [
+                    {
+                        "step_id": "s1\nforged-log-line",
+                        "agent_id": private,
+                        "capability": private,
+                        "depends_on": [private],
+                    }
+                ],
+            }
+        )
+        with caplog.at_level(logging.INFO, logger="webapp"):
+            assert (
+                client.post("/api/chat", json={"query": "show plan"}).status_code == 200
+            )
+        logs = "\n".join(
+            record.getMessage() for record in caplog.records if record.name == "webapp"
+        )
+        assert "private-nested-value" not in logs
+        assert "s1\\nforged-log-line" in logs
+        assert "s1\nforged-log-line" not in logs
+
+    @patch("webapp.run_turn", side_effect=OSError("inference unavailable"))
+    def test_failed_query_logs_conversation_and_duration(
+        self, run_turn: MagicMock, client: FlaskClient, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """Correlate failed queries with their conversation and elapsed time."""
+        conversation_id = client.get("/api/conversations").get_json()["active_id"]
+        with caplog.at_level(logging.INFO, logger="webapp"):
+            assert (
+                client.post("/api/chat", json={"query": "make plan"}).status_code == 502
+            )
+        assert (
+            f"Turn failed: conversation_id={conversation_id} turn=1 duration_ms="
+            in caplog.text
+        )
+        assert "error_type=OSError" in caplog.text
+        run_turn.assert_called_once()
+
     @patch("main.urllib.request.urlopen")
     def test_returns_formatted_json(
         self,
@@ -118,7 +231,39 @@ class TestChatRoute:
         assert response.status_code == 200
         data = response.get_json()
         assert json.loads(data["formatted"]) == SAMPLE_PLAN
-        assert raw_response in capsys.readouterr().out
+        output = capsys.readouterr().out
+        assert raw_response in output
+        assert "build battery firmware" in output
+        assert output.index("--- User query (") < output.index(
+            "--- KIO1 raw response ("
+        )
+        assert output.index("--- end raw response ---") < output.index(
+            "--- KIO1 formatted JSON ("
+        )
+        printed_json = (
+            output.split("--- KIO1 formatted JSON (", 1)[1]
+            .split("---\n", 1)[1]
+            .split("\n--- end formatted JSON ---", 1)[0]
+        )
+        assert json.loads(printed_json) == SAMPLE_PLAN
+
+    @patch("webapp.run_turn", return_value="not valid json")
+    def test_invalid_response_still_prints_query_and_raw_output(
+        self,
+        run_turn: MagicMock,
+        client: FlaskClient,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        """Keep the query and raw response available when JSON formatting fails."""
+        response = client.post("/api/chat", json={"query": "show broken output"})
+        assert response.get_json()["raw"] == "not valid json"
+        output = capsys.readouterr().out
+        assert "show broken output" in output and "not valid json" in output
+        assert output.index("--- User query (") < output.index(
+            "--- KIO1 raw response ("
+        )
+        assert "--- KIO1 formatted JSON (" not in output
+        run_turn.assert_called_once()
 
     @patch("main.urllib.request.urlopen")
     def test_chat_history_is_persisted(
@@ -195,6 +340,137 @@ class TestChatRoute:
 class TestConversationRoutes:
     """Tests for creating, listing, and activating persisted chats."""
 
+    @pytest.mark.parametrize("content", ["A" * 90, 42, "  multiple\n spaces  "])
+    def test_summary_skips_corrupt_lines_and_limits_content(
+        self, tmp_path: Path, content: str | int
+    ) -> None:
+        """Build safe titles without returning message bodies or prompt data."""
+        conversation_id = generate_session_id()
+        path = tmp_path / f"chat_{conversation_id}.jsonl"
+        path.write_text(
+            "invalid json\n[]\n"
+            + json.dumps({"role": "user", "content": content})
+            + "\n"
+        )
+        summary = webapp._conversation_summary(path)
+        assert summary["id"] == conversation_id
+        assert len(str(summary["title"])) <= 72
+        assert "messages" not in summary
+        if isinstance(content, int):
+            assert summary["title"] == "New conversation"
+        elif len(content) > 72:
+            assert str(summary["title"]).endswith("...")
+        else:
+            assert summary["title"] == "multiple spaces"
+
+    def test_path_helper_accepts_only_existing_regular_chats(
+        self, tmp_path: Path
+    ) -> None:
+        """Resolve valid existing chat IDs and reject absent or malformed IDs."""
+        conversation_id = generate_session_id()
+        assert webapp._conversation_path(tmp_path, conversation_id) is None
+        assert webapp._conversation_path(tmp_path, "../outside") is None
+        path = create_chat_file(str(tmp_path), "prompt", conversation_id)
+        assert webapp._conversation_path(tmp_path, conversation_id) == path
+
+    @patch("webapp._conversation_summary", side_effect=OSError("unreadable"))
+    def test_listing_skips_unreadable_history(
+        self, summary: MagicMock, client: FlaskClient
+    ) -> None:
+        """An unreadable saved chat must not break the history endpoint."""
+        response = client.get("/api/conversations")
+        assert response.status_code == 200
+        assert response.get_json()["conversations"] == []
+        summary.assert_called_once()
+
+    @patch("webapp.create_chat_file", side_effect=OSError("not writable"))
+    def test_create_storage_failure_keeps_active_chat(
+        self, create: MagicMock, client: FlaskClient
+    ) -> None:
+        """Do not change the active chat if creating its replacement fails."""
+        active_id = client.get("/api/conversations").get_json()["active_id"]
+        assert client.post("/api/conversations").status_code == 500
+        assert client.get("/api/conversations").get_json()["active_id"] == active_id
+        create.assert_called_once()
+
+    @patch("webapp.load_messages", side_effect=ValueError("corrupt"))
+    def test_activate_corrupt_history_returns_json_error(
+        self, load: MagicMock, client: FlaskClient
+    ) -> None:
+        """Return a controlled error for a valid ID whose history is corrupt."""
+        active_id = client.get("/api/conversations").get_json()["active_id"]
+        response = client.post(f"/api/conversations/{active_id}/activate")
+        assert response.status_code == 500
+        assert "error" in response.get_json()
+        load.assert_called_once()
+
+    def test_delete_active_conversation_creates_empty_replacement(
+        self, client: FlaskClient, tmp_path: Path
+    ) -> None:
+        """Keep the active session writable after deleting its history."""
+        original_id = client.get("/api/conversations").get_json()["active_id"]
+        response = client.delete(f"/api/conversations/{original_id}")
+        assert response.status_code == 200
+        active_id = response.get_json()["active_id"]
+        assert active_id != original_id
+        assert not (tmp_path / "chats" / f"chat_{original_id}.jsonl").exists()
+        listing = client.get("/api/conversations").get_json()
+        assert [item["id"] for item in listing["conversations"]] == [active_id]
+        assert (
+            client.post(f"/api/conversations/{active_id}/activate").get_json()[
+                "messages"
+            ]
+            == []
+        )
+
+    def test_delete_inactive_conversation_preserves_active(
+        self, client: FlaskClient
+    ) -> None:
+        """Deleting an older chat must not change the active conversation."""
+        original_id = client.get("/api/conversations").get_json()["active_id"]
+        active_id = client.post("/api/conversations").get_json()["id"]
+        response = client.delete(f"/api/conversations/{original_id}")
+        assert response.status_code == 200
+        assert response.get_json()["active_id"] == active_id
+        assert client.delete(f"/api/conversations/{original_id}").status_code == 404
+
+    def test_delete_rejects_invalid_id(self, client: FlaskClient) -> None:
+        """Reject IDs outside the persisted-chat naming convention."""
+        assert client.delete("/api/conversations/not-a-chat").status_code == 404
+
+    def test_delete_storage_failure_preserves_active_chat(
+        self, client: FlaskClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Do not replace session state when deleting its original file fails."""
+        original_id = client.get("/api/conversations").get_json()["active_id"]
+        original_file = tmp_path / "chats" / f"chat_{original_id}.jsonl"
+        original_unlink = Path.unlink
+
+        def deny_original(path: Path, missing_ok: bool = False) -> None:
+            """Simulate a permission failure only for the target conversation."""
+            if path == original_file:
+                raise PermissionError("test permission failure")
+            original_unlink(path, missing_ok=missing_ok)
+
+        monkeypatch.setattr(Path, "unlink", deny_original)
+        response = client.delete(f"/api/conversations/{original_id}")
+        assert response.status_code == 500
+        assert client.get("/api/conversations").get_json()["active_id"] == original_id
+        assert list((tmp_path / "chats").glob("chat_*.jsonl")) == [original_file]
+
+    def test_delete_rejects_symlink(self, client: FlaskClient, tmp_path: Path) -> None:
+        """Never delete a conversation through a symlink."""
+        target = tmp_path / "outside.jsonl"
+        target.write_text("protected")
+        conversation_id = generate_session_id()
+        (tmp_path / "chats" / f"chat_{conversation_id}.jsonl").symlink_to(target)
+        assert client.delete(f"/api/conversations/{conversation_id}").status_code == 404
+        assert target.read_text() == "protected"
+        assert all(
+            item["id"] != conversation_id
+            for item in client.get("/api/conversations").get_json()["conversations"]
+        )
+
     @patch("main.urllib.request.urlopen")
     def test_create_and_activate_conversation_keeps_histories_separate(
         self,
@@ -260,8 +536,117 @@ class TestConversationRoutes:
         assert response.get_json() == {"error": "Conversation not found."}
 
 
+class TestWorkflowRoute:
+    """Tests for explicit, opt-in container execution."""
+
+    @pytest.mark.parametrize(
+        ("error", "status"),
+        [
+            (ValueError("invalid plan"), 400),
+            (webapp.WorkflowConfigurationError("invalid registry"), 503),
+        ],
+    )
+    def test_dispatch_errors_release_execution_lock(
+        self,
+        client: FlaskClient,
+        monkeypatch: pytest.MonkeyPatch,
+        error: Exception,
+        status: int,
+    ) -> None:
+        """Failed requests return JSON and allow the next execution attempt."""
+        monkeypatch.setenv("KIO1_AGENT_CONFIG", "agents.json")
+        with patch("webapp.load_agent_registry", return_value={}), patch(
+            "webapp.dispatch_workflow", side_effect=error
+        ):
+            for attempt in range(2):
+                response = client.post(
+                    "/api/workflows", json={"approved": True, "plan": SAMPLE_PLAN}
+                )
+                assert response.status_code == status
+                assert "error" in response.get_json()
+
+    def test_concurrent_workflow_is_rejected(
+        self, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Reject a second workflow while the first holds its execution lock."""
+        monkeypatch.setenv("KIO1_AGENT_CONFIG", "agents.json")
+
+        def dispatch(plan: dict, registry: dict) -> dict:
+            """Submit a second request while the outer dispatcher is running."""
+            nested = client.post(
+                "/api/workflows", json={"approved": True, "plan": plan}
+            )
+            assert nested.status_code == 409
+            return {"status": "succeeded", "steps": []}
+
+        with patch("webapp.load_agent_registry", return_value={}), patch(
+            "webapp.dispatch_workflow", side_effect=dispatch
+        ):
+            assert (
+                client.post(
+                    "/api/workflows", json={"approved": True, "plan": SAMPLE_PLAN}
+                ).status_code
+                == 200
+            )
+
+    def test_dispatch_disabled_by_default(
+        self, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Generating plans must not require or enable agent connectivity."""
+        monkeypatch.delenv("KIO1_AGENT_CONFIG", raising=False)
+        assert client.post("/api/workflows", json={"approved": True}).status_code == 503
+
+    @patch("webapp.dispatch_workflow")
+    def test_dispatch_requires_approval_and_trusted_registry(
+        self,
+        dispatch: MagicMock,
+        client: FlaskClient,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Only explicitly approved plans reach the configured dispatcher."""
+        registry_path = tmp_path / "agents.json"
+        registry_path.write_text('{"KIO7": {"endpoint": "http://kio7:8000/tasks"}}')
+        monkeypatch.setenv("KIO1_AGENT_CONFIG", str(registry_path))
+        assert (
+            client.post("/api/workflows", json={"plan": SAMPLE_PLAN}).status_code == 400
+        )
+        dispatch.assert_not_called()
+        dispatch.return_value = {
+            "workflow_id": "wf-test",
+            "status": "succeeded",
+            "steps": [],
+        }
+        response = client.post(
+            "/api/workflows", json={"approved": True, "plan": SAMPLE_PLAN}
+        )
+        assert response.status_code == 200
+        assert response.get_json()["status"] == "succeeded"
+        dispatch.assert_called_once_with(
+            SAMPLE_PLAN, {"KIO7": {"endpoint": "http://kio7:8000/tasks"}}
+        )
+
+    def test_dispatch_rejects_malformed_and_oversized_requests(
+        self, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Return JSON validation errors without entering the dispatcher."""
+        monkeypatch.setenv("KIO1_AGENT_CONFIG", "unused.json")
+        assert client.post("/api/workflows", json=[]).status_code == 400
+        assert (
+            client.post("/api/workflows", data=b"x" * (1024 * 1024 + 1)).status_code
+            == 413
+        )
+
+
 class TestUploadRoute:
     """Tests for `POST /api/upload`."""
+
+    def test_rejects_filename_without_safe_characters(
+        self, client: FlaskClient
+    ) -> None:
+        """Reject names that become empty after secure filename normalization."""
+        response = client.post("/api/upload", data={"file": (BytesIO(b"data"), "!!!")})
+        assert response.status_code == 400
 
     def test_saves_file_to_assets_directory(
         self, client: FlaskClient, tmp_path: Path

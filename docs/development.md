@@ -29,7 +29,9 @@ ollama pull ministral-3:8b
 main.py              - Entry point (startup, run_turn() turn logic, Ollama request/response handling)
 webapp.py            - Flask web UI (saved conversations, chat, and file-upload routes)
 config_loader.py     - Configuration loading
-prompt_loader.py     - System prompt file reader
+prompt_loader.py     - Shared capability loader and system prompt renderer
+capabilities.json    - Replaceable agent descriptions and capability names
+workflow_planner.py  - Plan validation and trusted container dispatch
 chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON normalization for structured browser rendering
 session_logger.py    - Per-session log setup and duration measurement
@@ -61,6 +63,8 @@ pytest tests/ -v
 
 Tests use mocks for the Ollama HTTP API and telemetry exporters, along with temporary directories for file I/O. No running Ollama install or observability service is required for unit testing.
 
+The application-docstring regression test inspects every function in the root Python modules, including private helpers and nested route handlers. It requires documented arguments and `Returns:` or `Yields:` sections. New production functions must have focused unit tests; planner tests also cover invalid catalogs, dependency scheduling, transport failures, and disposable local HTTP receivers.
+
 ## Adding a New Module
 
 1. Create the module file at the project root.
@@ -77,6 +81,8 @@ System prompts live in `prompts/`. To iterate on a prompt:
 3. Restart the orchestrator.
 
 Keep previous versions for comparison and rollback.
+
+Keep `{{KIO_CAPABILITIES}}` in prompt templates. Agent descriptions and exact capability names belong in `capabilities.json`, not a Python constant or a second prompt catalog. Use `KIO1_CAPABILITIES_PATH` for an alternate catalog and restart KIO1 after changes. Tests verify renamed capabilities affect both prompting and validation and that retired capabilities are rejected.
 
 ## Code Quality
 
@@ -110,7 +116,10 @@ Run `make help` to see all targets.
 ## Code Style
 
 - Type annotations on all function signatures.
-- Docstrings in Google style with `Args:` and `Returns:` sections.
+- Docstrings in Google style with `Args:` and `Returns:` sections, or `Yields:`
+	for context managers/generators. No-argument functions describe their implicit
+	inputs in prose; mutating functions document side effects and the absence of
+	a returned value. An empty `Args: None` section is not required.
 - No classes except dataclasses for configuration.
 - Run `make format` before committing to apply consistent formatting.
 - Run `make ci` before opening a pull request.

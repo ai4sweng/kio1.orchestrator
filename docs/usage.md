@@ -25,7 +25,13 @@ Open that address in a browser. Type a request in the message box at the bottom 
 
 Workflow-plan responses are rendered as numbered step cards with the agent, capability, task, and explanation. Other JSON responses are shown as readable labeled fields and lists. Raw model responses are printed in the terminal running KIO1; they are not shown in the dashboard. Invalid JSON is reported as an error in the conversation, with the raw response available in the server terminal.
 
+For each completed inference, the terminal prints labeled blocks in this order: the user's query, the raw LLM response, and the formatted workflow JSON. If the response cannot be formatted, the query and raw response are still printed.
+
+When **Run workflow** dispatches a task, a separate **KIO1 agent payload JSON** block shows the actual request body sent to that KIO, including its inputs and dependency results. These payloads are finalized during execution, not generation; authentication headers are never printed. Terminal output may contain sensitive task data, so redact it before sharing.
+
 Use **New chat** in the history sidebar to start a separate conversation. Select a saved conversation to restore its messages and continue with its existing context. Conversation titles come from the first user query. The history is shared by this single-operator app instance; it is not separated by user account.
+
+Use the trash icon beside a saved conversation and confirm to permanently delete it. Deleting the active conversation starts a new empty chat. Uploaded files and server logs are not deleted.
 
 Each chat is saved as a JSONL file in the configured chat directory. User and assistant messages are restored when a saved conversation is opened; the system prompt is kept out of the browser and supplied separately to the model.
 
@@ -47,7 +53,9 @@ Use the Model, Dataset, or File buttons next to the message box to upload a mode
 > Build a REST API for user management with authentication
 ```
 
-The dashboard presents this as a workflow summary with six numbered agent steps and an explanation. The raw JSON is printed to the server terminal and saved as the assistant message in the chat history. KIO1 formats and displays the plan; it does not validate or dispatch the proposed workflow.
+The dashboard presents this as a workflow summary with numbered agent steps and an explanation. The raw JSON is printed to the server terminal and saved as the assistant message in the chat history. Generating a plan does not execute it.
+
+To enable execution, configure `agents.json` using `agents.example.json`, set `KIO1_AGENT_CONFIG=agents.json`, and restart KIO1. Select **Run workflow** and confirm. The planner validates the complete plan before sending tasks; successful dependency results are forwarded to dependent steps. Failed or unknown outcomes stop new dispatches. Results are displayed but are not persisted in chat history. See the [container contract](workflow-contract.md) for setup and limitations.
 
 ### Bug fix request
 
