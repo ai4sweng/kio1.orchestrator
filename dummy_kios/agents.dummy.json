@@ -1,0 +1,14 @@
+{
+  "KIO2": {"endpoint": "http://kio2:8000/tasks"},
+  "KIO3": {"endpoint": "http://kio3:8000/tasks"},
+  "KIO4": {"endpoint": "http://kio4:8000/tasks"},
+  "KIO5": {"endpoint": "http://kio5:8000/tasks"},
+  "KIO6": {"endpoint": "http://kio6:8000/tasks"},
+  "KIO7": {"endpoint": "http://kio7:8000/tasks"},
+  "KIO8": {"endpoint": "http://kio8:8000/tasks"},
+  "KIO9": {"endpoint": "http://kio9:8000/tasks"},
+  "KIO10": {"endpoint": "http://kio10:8000/tasks"},
+  "KIO11": {"endpoint": "http://kio11:8000/tasks"},
+  "KIO12": {"endpoint": "http://kio12:8000/tasks"},
+  "KIO13": {"endpoint": "http://kio13:8000/tasks"}
+}

@@ -65,3 +65,7 @@ Copy `agents.example.json` to `agents.json`, configure only available agents, an
 This version has no durable scheduler, cancellation, automatic retries, status polling, or restart recovery. Results appear in the browser response, not saved chat history. Run one KIO1 process; its execution lock is process-local. For tasks longer than 60 seconds, agree a separate asynchronous job/status protocol first.
 
 Before rollout, provide actual endpoints, capability schemas, credentials via environment variables, shared artifact storage, execution-time budgets, and any mandatory operator approvals. Confirm this contract with every container team.
+
+## Test Receivers
+
+The [dummy KIO2-KIO13 stack](dummy-kios.md) supplies a receiver and endpoint for every agent, so full workflows can be tested before real containers are ready. Each dummy prints only the unchanged request body and a separator, then returns a correlated success acknowledgement. Health checks are silent. These receivers deliberately omit production authentication, durable idempotency, deadline enforcement, and real task execution; they are test doubles, not production reference implementations.

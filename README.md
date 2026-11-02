@@ -57,6 +57,34 @@ Select **Run workflow** below a plan and confirm. Read the brief [container cont
 
 For Docker, additionally mount `agents.json` read-only, set `KIO1_AGENT_CONFIG=/app/agents.json`, and put KIO1 and the agents on the same Docker network. Pass bearer tokens through environment variables, not JSON files. Do not expose the shared operator UI without an authenticated reverse proxy.
 
+### Dummy KIOs for Integration Testing
+
+`dummy_kios/` provides separate KIO2-KIO13 receivers using one shared image.
+Each prints only the received body followed by a separator line; health checks
+and HTTP access messages are silent. Receivers acknowledge tasks without
+executing their instructions.
+
+```bash
+docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
+docker compose -f dummy_kios/compose.yaml build
+docker compose -f dummy_kios/compose.yaml up -d --wait
+docker compose -f dummy_kios/compose.yaml logs -f --no-log-prefix --no-color
+```
+
+`up -d` runs the agents in the background, so they keep running after SSH logout.
+All twelve services use `restart: unless-stopped`, allowing recovery after a
+crash or Docker restart. For EC2 boot setup and persistent operation, see
+[AWS deployment](docs/dummy-kios.md#aws-keep-containers-running).
+
+Stop the old standalone `kio3` container first if it is still running to avoid
+duplicate network names. Recreate KIO1 on the same network with
+`dummy_kios/agents.dummy.json` mounted read-only and `KIO1_AGENT_CONFIG` set to
+its container path. This replaces the old KIO3-only registry and allows
+multi-agent workflows. Generate a plan, then select **Run workflow**.
+See [Dummy KIOs Guide](docs/dummy-kios.md) for the full KIO1 launch command,
+readiness checks, and cleanup. The older [single-KIO3 guide](docs/dummy-kio3.md)
+remains available. Use synthetic data only.
+
 ### Replacing Agent Capabilities
 
 Edit [capabilities.json](capabilities.json), or set `KIO1_CAPABILITIES_PATH` to a replacement JSON file. Each agent entry contains a `description` and a nonempty list of unique `capabilities`. This catalog supplies both the system prompt and planner validation; no Python capability map needs editing. Custom prompt files should include `{{KIO_CAPABILITIES}}` where the catalog should appear.
@@ -93,10 +121,32 @@ docker run --rm -p 5000:5000 --add-host=host.docker.internal:host-gateway \
   kio1
 ```
 
-On AWS, run:
+On AWS, run the following from the repository root. Docker and Docker Compose
+must be installed. To enable Docker at boot, run this once on the EC2 host:
+
+```bash
+sudo systemctl enable --now docker
+```
+
+For testing with all dummy KIOs, create their shared network and start them in
+detached mode before starting KIO1:
+
+```bash
+docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
+docker compose -f dummy_kios/compose.yaml build
+docker compose -f dummy_kios/compose.yaml up -d --wait
+mkdir -p chats logs assets
+```
+
+Build the KIO1 image:
+
 ```bash
 docker buildx build --load -t kio1-orchestrator:latest .
 ```
+
+Start KIO1 in the background with the full dummy registry. This example assumes
+an Ollama container named `ollama` on `kio1-network`. Stop/remove any previous
+KIO1 container using the same name before replacing it; retain its mounted data.
 
 ```bash
 docker run -d \
@@ -108,9 +158,18 @@ docker run -d \
   -v "$PWD/chats:/app/chats" \
   -v "$PWD/logs:/app/logs" \
   -v "$PWD/assets:/app/assets" \
+  -v "$PWD/dummy_kios/agents.dummy.json:/app/agents.dummy.json:ro" \
   -e KIO1_OLLAMA_ENDPOINT=http://ollama:11434 \
+  -e KIO1_AGENT_CONFIG=/app/agents.dummy.json \
   kio1-orchestrator:latest
 ```
+
+You can now log out of SSH; KIO1 and the dummy agents stay running. Ollama must
+also remain running and, if containerized, have an appropriate restart policy.
+Detached mode does not keep a stopped or terminated EC2 instance running.
+Do not use `--rm` with `--restart`. Restrict port 5000 in the EC2 security group
+to trusted clients or an authenticated reverse proxy; no dummy-agent ports need
+to be opened. Replace the dummy registry with real endpoints for real execution.
 
 Open `http://localhost:5000` once the container is running. `docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/`, `logs/`, and `assets/` keeps session history, logs, and uploaded files on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
 
@@ -155,6 +214,7 @@ See [Development Guide](docs/development.md) for the full test, lint, and format
 
 ## Documentation
 
+- [Dummy KIOs Guide](docs/dummy-kios.md) - Build and run all twelve quiet test receivers
 - [Workflow Container Contract](docs/workflow-contract.md) - Receiver implementation and planner setup
 - [Architecture](docs/architecture.md) — System overview, components, and data flow
 - [Configuration](docs/configuration.md) — All config.json settings explained

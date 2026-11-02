@@ -1,0 +1,64 @@
+name: kio-dummies
+
+x-dummy: &dummy
+  image: kio-dummy:latest
+  pull_policy: never
+  restart: unless-stopped
+  networks:
+    - agents
+
+services:
+  kio2:
+    <<: *dummy
+    build: .
+    environment:
+      KIO_AGENT_ID: KIO2
+  kio3:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO3
+  kio4:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO4
+  kio5:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO5
+  kio6:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO6
+  kio7:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO7
+  kio8:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO8
+  kio9:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO9
+  kio10:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO10
+  kio11:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO11
+  kio12:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO12
+  kio13:
+    <<: *dummy
+    environment:
+      KIO_AGENT_ID: KIO13
+
+networks:
+  agents:
+    name: ${KIO_DUMMY_NETWORK:-kio1-network}
+    external: true

@@ -22,7 +22,14 @@ from session_logger import generate_session_id, init_logger
 
 
 @pytest.mark.parametrize(
-    "module_path", sorted(Path(__file__).parent.parent.glob("*.py"))
+    "module_path",
+    sorted(
+        [
+            *Path(__file__).parent.parent.glob("*.py"),
+            *(Path(__file__).parent.parent / "dummy_kio3").glob("*.py"),
+            *(Path(__file__).parent.parent / "dummy_kios").glob("*.py"),
+        ]
+    ),
 )
 def test_application_functions_document_inputs_and_outputs(module_path: Path) -> None:
     """Keep every application function's inputs and outputs documented.
