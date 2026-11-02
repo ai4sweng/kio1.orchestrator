@@ -1,6 +1,6 @@
 # KIO Agent Contract v1
 
-Share this document with KIO2-KIO13 container developers. KIO1 implements this initial synchronous HTTP contract; real container integration is not yet verified.
+KIO1 implements this initial synchronous HTTP contract.
 
 ## Task Request
 
