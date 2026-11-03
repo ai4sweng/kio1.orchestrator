@@ -55,35 +55,9 @@ python3 main.py
 
 Select **Run workflow** below a plan and confirm. Read the brief [container contract](docs/workflow-contract.md) before implementing receivers. It covers payloads, dependencies, responses, idempotency, deadlines, authentication, and the initial synchronous implementation's limits. KIO7 handles code generation; KIO10 handles TinyML and energy efficiency. Existing chat behavior is unchanged.
 
+Before running, click any step's task text to edit it and use its capability checkboxes to select or deselect capabilities for that KIO. Each step needs a nonblank task and at least one capability. **Run workflow** sends your current edits, not the original LLM task. The payload includes the selected `capabilities` list and a compatible primary `capability`. Edits are local to the displayed plan; reloading or switching conversations restores the original saved LLM response.
+
 For Docker, additionally mount `agents.json` read-only, set `KIO1_AGENT_CONFIG=/app/agents.json`, and put KIO1 and the agents on the same Docker network. Pass bearer tokens through environment variables, not JSON files. Do not expose the shared operator UI without an authenticated reverse proxy.
-
-### Dummy KIOs for Integration Testing
-
-`dummy_kios/` provides separate KIO2-KIO13 receivers using one shared image.
-Each prints only the received body followed by a separator line; health checks
-and HTTP access messages are silent. Receivers acknowledge tasks without
-executing their instructions.
-
-```bash
-docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
-docker compose -f dummy_kios/compose.yaml build
-docker compose -f dummy_kios/compose.yaml up -d --wait
-docker compose -f dummy_kios/compose.yaml logs -f --no-log-prefix --no-color
-```
-
-`up -d` runs the agents in the background, so they keep running after SSH logout.
-All twelve services use `restart: unless-stopped`, allowing recovery after a
-crash or Docker restart. For EC2 boot setup and persistent operation, see
-[AWS deployment](docs/dummy-kios.md#aws-keep-containers-running).
-
-Stop the old standalone `kio3` container first if it is still running to avoid
-duplicate network names. Recreate KIO1 on the same network with
-`dummy_kios/agents.dummy.json` mounted read-only and `KIO1_AGENT_CONFIG` set to
-its container path. This replaces the old KIO3-only registry and allows
-multi-agent workflows. Generate a plan, then select **Run workflow**.
-See [Dummy KIOs Guide](docs/dummy-kios.md) for the full KIO1 launch command,
-readiness checks, and cleanup. The older [single-KIO3 guide](docs/dummy-kio3.md)
-remains available. Use synthetic data only.
 
 ### Replacing Agent Capabilities
 
@@ -91,96 +65,186 @@ Edit [capabilities.json](capabilities.json), or set `KIO1_CAPABILITIES_PATH` to 
 
 Restart KIO1 after changing the catalog or its path so the startup-loaded prompt and validation use the same definitions. Previously saved plans with retired capabilities are rejected. See [Configuration](docs/configuration.md).
 
-### In Docker
+## Docker Deployment: KIO1 Only
 
-The orchestrator also ships a `Dockerfile`. It reaches Ollama on the host via `host.docker.internal`, so mount your `config.json` at runtime and override the endpoint with an env var — the same `config.json` then works both on the host and in the container. `config.json` is mounted (not baked into the image) so credentials such as `otlp_bearer_token` stay out of image layers, and `KIO1_OLLAMA_ENDPOINT` overrides the file's endpoint at runtime, so there is no second config file to drift. Ollama must be running on the host first.
+These instructions run KIO1 against your existing Ollama installation. No other KIO agents or agent registry are required. Chat, uploads, and plan generation work; task dispatch remains disabled unless you explicitly configure real agents as described above.
 
-#### Build the container
+Run all build and launch commands from the repository root containing `Dockerfile` and `config.json`, not from `docs/`. Docker Engine must be installed and accessible to your user. A Python virtual environment is not required for Docker builds.
 
-Rebuild the image whenever `Dockerfile`, `requirements.txt`, or the application source changes:
+### Local Deployment: Foreground
+
+1. Start Ollama on your machine and download the exact model named in `config.json` using `ollama pull MODEL_NAME`, replacing `MODEL_NAME` with that name. Check its API:
 
 ```bash
-docker build -t kio1 .
+curl --fail --max-time 5 http://127.0.0.1:11434/api/tags
 ```
 
-#### Launch the container
-
-Use this to start the already-built image — no rebuild required. Create the mounted host directories first if they do not already exist; otherwise Docker creates them as `root`, and the container's non-root user will not be able to write to them (this bites `assets/` in particular, since it is only created on first upload):
+2. Prepare persistent directories and build KIO1:
 
 ```bash
 mkdir -p chats logs assets
+docker build -t kio1-orchestrator:latest .
 ```
 
+The image runs as UID 1000. These host directories must be writable by that UID and `config.json` must be readable. Create directories before mounting them so Docker does not create them as root. Resolve ownership issues on only these intended paths; do not use `chmod 777` or delete data.
+
+3. Verify Ollama from Docker. The default uses host-based Ollama; replace `OLLAMA_URL` with your existing working remote base URL if applicable, without a trailing slash:
+
 ```bash
-docker run --rm -p 5000:5000 --add-host=host.docker.internal:host-gateway \
-  -v "$PWD/config.json:/app/config.json" \
+export OLLAMA_URL=http://host.docker.internal:11434
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -e OLLAMA_URL="$OLLAMA_URL" \
+  --entrypoint python kio1-orchestrator:latest \
+  -c 'import os, urllib.request; print(urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status)'
+```
+
+Continue only if it prints `200`. If the host check succeeds but this fails, see [Ollama connectivity](#ollama-connectivity).
+
+4. Launch KIO1 in the same terminal, using the verified `OLLAMA_URL`:
+
+```bash
+docker run --rm \
+  --name kio1 \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:5000:5000 \
+  -v "$PWD/config.json:/app/config.json:ro" \
   -v "$PWD/chats:/app/chats" \
   -v "$PWD/logs:/app/logs" \
   -v "$PWD/assets:/app/assets" \
-  -e KIO1_OLLAMA_ENDPOINT=http://host.docker.internal:11434 \
-  kio1
+  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
+  kio1-orchestrator:latest
 ```
 
-On AWS, run the following from the repository root. Docker and Docker Compose
-must be installed. To enable Docker at boot, run this once on the EC2 host:
+This is a foreground run: keep the terminal open. Wait for model loading and `KIO1 Orchestrator web UI` in the output, then open **http://127.0.0.1:5000**. Press Ctrl+C to stop KIO1. `--rm` removes its container, while chat history, logs, and uploads remain in the mounted directories. Do not add `-d` if you want this attached local workflow.
+
+### AWS Deployment: Background
+
+Copy the repository and your configuration to the EC2 Linux instance. Install Docker Engine and run Ollama there as a persistent service with the configured model, or retain your working remote Ollama service. Run the build and launch commands on EC2 from the repository root.
+
+1. On a systemd-based host such as Ubuntu or Amazon Linux, run this privileged command yourself to enable Docker at boot:
 
 ```bash
 sudo systemctl enable --now docker
 ```
 
-For testing with all dummy KIOs, create their shared network and start them in
-detached mode before starting KIO1:
+2. Prepare storage and build KIO1:
 
 ```bash
-docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
-docker compose -f dummy_kios/compose.yaml build
-docker compose -f dummy_kios/compose.yaml up -d --wait
 mkdir -p chats logs assets
+docker build -t kio1-orchestrator:latest .
 ```
 
-Build the KIO1 image:
+The same UID 1000 directory-permission requirements apply on EC2. No Docker Compose stack or agent registry is needed for this deployment.
+
+3. Verify Ollama from Docker before replacing an existing working deployment:
 
 ```bash
-docker buildx build --load -t kio1-orchestrator:latest .
+export OLLAMA_URL=http://host.docker.internal:11434
+docker run --rm \
+  --add-host=host.docker.internal:host-gateway \
+  -e OLLAMA_URL="$OLLAMA_URL" \
+  --entrypoint python kio1-orchestrator:latest \
+  -c 'import os, urllib.request; print(urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status)'
 ```
 
-Start KIO1 in the background with the full dummy registry. This example assumes
-an Ollama container named `ollama` on `kio1-network`. Stop/remove any previous
-KIO1 container using the same name before replacing it; retain its mounted data.
+Use your verified remote URL instead if applicable. Continue only if this prints `200`.
+
+4. Launch detached KIO1. If `kio1` already exists, first follow [Rebuild and replace](#rebuild-and-replace), preserving its data:
 
 ```bash
 docker run -d \
   --name kio1 \
   --restart unless-stopped \
-  --network kio1-network \
-  -p 5000:5000 \
+  --add-host=host.docker.internal:host-gateway \
+  -p 127.0.0.1:5000:5000 \
   -v "$PWD/config.json:/app/config.json:ro" \
   -v "$PWD/chats:/app/chats" \
   -v "$PWD/logs:/app/logs" \
   -v "$PWD/assets:/app/assets" \
-  -v "$PWD/dummy_kios/agents.dummy.json:/app/agents.dummy.json:ro" \
-  -e KIO1_OLLAMA_ENDPOINT=http://ollama:11434 \
-  -e KIO1_AGENT_CONFIG=/app/agents.dummy.json \
+  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
   kio1-orchestrator:latest
 ```
 
-You can now log out of SSH; KIO1 and the dummy agents stay running. Ollama must
-also remain running and, if containerized, have an appropriate restart policy.
-Detached mode does not keep a stopped or terminated EC2 instance running.
-Do not use `--rm` with `--restart`. Restrict port 5000 in the EC2 security group
-to trusted clients or an authenticated reverse proxy; no dummy-agent ports need
-to be opened. Replace the dummy registry with real endpoints for real execution.
+`-d` runs independently of SSH. `--restart unless-stopped` allows recovery after process exits and Docker/host restarts, provided Docker starts and you did not deliberately stop the container. Do not combine `--rm` with `--restart`. All Docker options belong before the image name.
 
-Open `http://localhost:5000` once the container is running. `docker run` always creates a new container rather than reusing one, so without `--rm` every launch leaves a stopped container behind (visible in `docker ps -a`). `--rm` deletes the container as soon as it exits; mounting `chats/`, `logs/`, and `assets/` keeps session history, logs, and uploaded files on the host regardless, so nothing is lost. To clear out containers created before this flag was added:
+5. Check startup on EC2:
 
 ```bash
-docker container prune
+docker logs -f kio1
 ```
 
-Stop Container:
+Wait for model loading and the UI startup message, then press Ctrl+C to leave the log viewer. The detached container keeps running. Check the UI on EC2:
+
 ```bash
-docker stop <CONTAINER ID>
+curl --fail --max-time 5 http://127.0.0.1:5000/
 ```
+
+6. From your laptop, open an SSH tunnel, replacing the SSH login details and adding your usual key option if necessary:
+
+```bash
+ssh -N -L 5000:127.0.0.1:5000 ubuntu@EC2_PUBLIC_IP
+```
+
+Open **http://127.0.0.1:5000** on your laptop. Amazon Linux commonly uses `ec2-user`. If laptop port 5000 is occupied, forward local port 5001 instead and open that port. Closing the tunnel removes browser access but does not stop KIO1. An existing authenticated host reverse proxy can also reach the loopback-published UI. No public security-group rule for port 5000 is needed; restrict SSH to trusted clients and do not expose Ollama port 11434 publicly.
+
+You can close all SSH terminals after startup. Ollama must also remain running as a host service or detached container with its own restart policy. No `nohup` or terminal multiplexer is needed. Logging out is not stopping or terminating EC2: containers cannot run while the instance is stopped, and persistent files depend on retaining its storage.
+
+After reconnecting, inspect KIO1 and follow logs:
+
+```bash
+docker ps --filter name=kio1
+docker logs -f kio1
+```
+
+Ctrl+C stops only the log viewer. Deliberately stop with `docker stop kio1` and resume with `docker start kio1`. Do not stop it just to log out. An `unhealthy` status alone does not cause an automatic restart.
+
+### Ollama Connectivity
+
+`KIO1_OLLAMA_ENDPOINT` overrides the endpoint in `config.json`. The Docker examples use `host.docker.internal` with Linux's `host-gateway` mapping. Inside KIO1, `127.0.0.1` refers to KIO1 itself, not the host.
+
+If host `/api/tags` works but the Docker check fails, inspect the listener:
+
+```bash
+ss -ltnp 'sport = :11434'
+```
+
+A listener bound only to host `127.0.0.1` cannot serve the Docker host gateway. Before widening the listener, configure the host firewall to allow port 11434 only from the intended trusted Docker networks, and keep it closed publicly in the EC2 security group. Firewall commands depend on your Linux distribution and existing rules; do not disable the firewall.
+
+For Ollama installed as a systemd service, run `sudo systemctl edit ollama` yourself and add this override:
+
+```ini
+[Service]
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+Apply it only after the access restrictions are in place:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+If you run Ollama manually, set the same `OLLAMA_HOST` value in its environment before starting `ollama serve`; do not start a second server on an occupied port. Repeat the host and Docker connectivity checks. If Ollama is already containerized, use its actual DNS name on a Docker network shared with KIO1 and add that network to both the check and launch commands; do not assume a container called `ollama` exists.
+
+KIO1 loads its model before starting Flask. A bad endpoint or missing model can prevent the UI from starting and cause nginx 502. Inspect `docker logs kio1` first; if EC2's local UI check succeeds but the public URL fails, inspect nginx's upstream separately. Slow model loading may temporarily make the container unhealthy.
+
+### Rebuild and Replace
+
+Rebuild after changes to application source, UI files, `requirements.txt`, or `Dockerfile`:
+
+```bash
+docker build -t kio1-orchestrator:latest .
+```
+
+Building does not update existing containers. After the new image's Ollama check succeeds, stop and preserve an existing named container:
+
+```bash
+docker stop kio1
+docker rename kio1 "kio1-previous-$(date +%Y%m%d-%H%M%S)"
+```
+
+Skip the rename for a foreground container created with `--rm`; it is already removed when stopped. Substitute the actual name if different. Rerun the local or AWS launch command with the same host directories and verified endpoint. `docker restart kio1` alone still runs the old image. Do not delete mounted data or prune unrelated containers. If port 5000 remains occupied, identify the other listener before stopping any unrelated process.
 
 ## Observability
 
@@ -192,7 +256,7 @@ tail -f "$(ls -t logs/log_*.log | head -n 1)"
 
 Each query logs its duration and generated plan's workflow ID, mode, step count, and agent assignments. Generation reports `dispatch=not_started`; **Run workflow** adds execution timing, per-task outcomes, and succeeded/failed/unknown/blocked counts. Logging works even when OpenTelemetry is disabled. See [Debugging Logs](docs/observability.md#local-debugging-logs) for examples and fields. The new summaries omit payloads; existing DEBUG logs can contain conversation data.
 
-The terminal prints the user query, raw LLM reply, and formatted JSON in that order. **Run workflow** additionally prints each actual agent task payload before its HTTP request. These full-content prints exclude authentication headers but can contain sensitive task data; redact them before sharing.
+The terminal prints the user query, raw LLM reply, and formatted JSON in that order. **Run workflow** additionally prints each actual agent task payload and writes its exact JSON to the session log immediately before its HTTP request, identified by `Task payload before dispatch`. This includes operator edits, selected capabilities, inputs, and dependency results. Authentication headers are excluded, but task data can be sensitive; protect these logs and redact them before sharing.
 
 <!-- KIO1 can export OpenTelemetry traces and metrics to a local persistent Tempo and Prometheus stack. Telemetry is disabled by default.
 

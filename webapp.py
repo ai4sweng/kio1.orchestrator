@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 from chat_history import create_chat_file, load_messages
 from config_loader import Config
 from main import run_turn
+from prompt_loader import load_capabilities
 from session_logger import generate_session_id, measure_duration
 from telemetry import trace_operation
 from workflow_planner import (
@@ -172,6 +173,7 @@ def create_app(
             "index.html",
             model_name=session.config.model,
             workflow_enabled=bool(os.environ.get("KIO1_AGENT_CONFIG")),
+            capability_catalog=load_capabilities(),
         )
 
     @app.post("/api/workflows")

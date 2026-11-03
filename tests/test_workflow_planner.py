@@ -252,6 +252,56 @@ def test_independent_tasks_have_no_dependency_results(
     )
 
 
+@patch("workflow_planner._send_task", side_effect=succeeded)
+def test_operator_edits_change_payload_and_idempotency(sender: MagicMock) -> None:
+    """Keep dependencies and data while forwarding edited tasks and selections."""
+    plan = make_plan()
+    dispatch_workflow(plan, REGISTRY)
+    original_key = sender.call_args_list[0].args[2]["idempotency_key"]
+    plan["steps"][0]["task"] = "Review code instead\nKeep <literal> text & spacing."
+    plan["steps"][0]["data"] = {"artifact": "assets/files/service.py"}
+    dispatch_workflow(plan, REGISTRY)
+    task_key = sender.call_args_list[2].args[2]["idempotency_key"]
+    plan["steps"][0]["capabilities"] = ["code_generation", "code_understanding"]
+    dispatch_workflow(plan, REGISTRY)
+    edited = sender.call_args_list[4].args[2]
+    assert edited["task"] == plan["steps"][0]["task"]
+    assert edited["data"] == plan["steps"][0]["data"]
+    assert edited["capabilities"] == ["code_generation", "code_understanding"]
+    assert edited["capability"] == "code_generation"
+    assert len({original_key, task_key, edited["idempotency_key"]}) == 3
+    assert sender.call_args_list[5].args[2]["dependency_results"] == {
+        "s1": {"artifact": "s1"}
+    }
+    plan["steps"][0]["capabilities"] = ["code_understanding"]
+    plan["steps"][0]["capability"] = "code_understanding"
+    dispatch_workflow(plan, REGISTRY)
+    assert sender.call_args_list[6].args[2]["capabilities"] == ["code_understanding"]
+    assert sender.call_args_list[6].args[2]["capability"] == "code_understanding"
+
+
+@pytest.mark.parametrize(
+    "selected",
+    [
+        [],
+        None,
+        "validation",
+        ["validation", "validation"],
+        ["validation", "code_generation"],
+        ["validation", {}],
+        ["test_automation"],
+    ],
+)
+@patch("workflow_planner._send_task")
+def test_invalid_selections_never_send(sender: MagicMock, selected: object) -> None:
+    """Reject invalid selections even in later steps before sending any task."""
+    plan = make_plan()
+    plan["steps"][1]["capabilities"] = selected
+    with pytest.raises(ValueError, match="capabilities must"):
+        dispatch_workflow(plan, REGISTRY)
+    sender.assert_not_called()
+
+
 @patch("workflow_planner._send_task", return_value={"status": "failed"})
 def test_failure_blocks_remaining_steps(sender: MagicMock) -> None:
     """Do not run downstream work after a failed dependency."""
@@ -400,12 +450,16 @@ def test_transport_enforces_contract(
 
 
 @patch("workflow_planner.urllib.request.build_opener")
+@pytest.mark.parametrize("delivery_fails", [False, True])
 def test_terminal_payload_matches_agent_request_body(
     opener: MagicMock,
     capsys: pytest.CaptureFixture[str],
     monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+    tmp_path: Path,
+    delivery_fails: bool,
 ) -> None:
-    """Print the actual task body, including dependency results, without auth headers."""
+    """Print and file-log exact task inputs before delivery, without auth headers."""
     payload = {
         "schema_version": "1.0",
         "workflow_id": "wf-test",
@@ -413,7 +467,8 @@ def test_terminal_payload_matches_agent_request_body(
         "agent_id": "KIO11",
         "idempotency_key": "abc",
         "capability": "validation",
-        "task": "Validate service",
+        "capabilities": ["validation", "test_automation"],
+        "task": "Operator edited task\nValidate <literal> text & caf\u00e9.",
         "data": {"checks": ["CRUD"]},
         "dependency_results": {"s1": {"artifact": "service.zip"}},
         "deadline_at": "2026-10-30T12:01:00+00:00",
@@ -424,18 +479,52 @@ def test_terminal_payload_matches_agent_request_body(
     response.read.return_value = json.dumps(
         {**payload, "status": "succeeded", "result": {}}
     ).encode()
-    assert (
-        _send_task("http://kio11:8000/tasks", "KIO_TEST_PRINT_TOKEN", payload)["status"]
-        == "succeeded"
-    )
+    response_context = opener.return_value.open.return_value
+
+    def check_logged_before_open(request: object, timeout: int) -> MagicMock:
+        """Require the complete payload log to exist before HTTP delivery begins."""
+        records = [
+            record
+            for record in caplog.records
+            if record.getMessage().startswith("Task payload before dispatch:")
+        ]
+        assert len(records) == 1
+        assert records[0].levelno == logging.INFO
+        assert json.loads(records[0].getMessage().split(" payload=", 1)[1]) == payload
+        if delivery_fails:
+            raise TimeoutError("synthetic delivery failure")
+        return response_context
+
+    opener.return_value.open.side_effect = check_logged_before_open
+    caplog.set_level(logging.INFO, logger="workflow_planner")
+    log_path = tmp_path / "log_dispatch.log"
+    file_handler = logging.FileHandler(log_path)
+    task_logger = logging.getLogger("workflow_planner")
+    task_logger.addHandler(file_handler)
+    try:
+        result = _send_task("http://kio11:8000/tasks", "KIO_TEST_PRINT_TOKEN", payload)
+    finally:
+        task_logger.removeHandler(file_handler)
+        file_handler.close()
+    assert result["status"] == ("unknown" if delivery_fails else "succeeded")
     output = capsys.readouterr().out
     printed_json = output.split(
         "--- KIO1 agent payload JSON (workflow wf-test, step s2, agent KIO11) ---\n", 1
     )[1].split("\n--- end agent payload JSON ---", 1)[0]
     request = opener.return_value.open.call_args.args[0]
     assert json.loads(printed_json) == json.loads(request.data) == payload
+    file_output = log_path.read_text()
+    payload_line = next(
+        line
+        for line in file_output.splitlines()
+        if line.startswith("Task payload before dispatch:")
+    )
+    assert "workflow_id=wf-test step_id=s2 agent_id=KIO11" in payload_line
+    assert payload_line.split(" payload=", 1)[1] == request.data.decode("utf-8")
     assert "header-only-test-secret" not in output
     assert "Authorization" not in output
+    assert "header-only-test-secret" not in caplog.text + file_output
+    assert "Authorization" not in caplog.text + file_output
 
 
 def test_invalid_plan_type() -> None:
@@ -595,8 +684,9 @@ def test_parallel_tasks_actually_overlap() -> None:
 
 
 @pytest.mark.parametrize("redirect", [False, True])
+@pytest.mark.parametrize("edited", [False, True])
 def test_real_http_contract_and_redirect_rejection(
-    monkeypatch: pytest.MonkeyPatch, redirect: bool
+    monkeypatch: pytest.MonkeyPatch, redirect: bool, edited: bool
 ) -> None:
     """Exercise actual urllib transport against disposable local HTTP agents."""
     received: list[dict] = []
@@ -637,7 +727,20 @@ def test_real_http_contract_and_redirect_rejection(
             agent_id: {"endpoint": endpoint, "token_env": "KIO_TEST_TOKEN"}
             for agent_id in REGISTRY
         }
-        result = dispatch_workflow(make_plan(), registry)
+        plan = make_plan()
+        if edited:
+            plan["steps"][0].update(
+                task="Operator's revised task\nPreserve this second line.",
+                capability="code_understanding",
+                capabilities=["code_understanding"],
+            )
+        result = dispatch_workflow(plan, registry)
+        assert received[0]["task"] == plan["steps"][0]["task"]
+        if edited:
+            assert received[0]["capabilities"] == ["code_understanding"]
+            assert received[0]["capability"] == "code_understanding"
+        else:
+            assert "capabilities" not in received[0]
         if redirect:
             assert result["status"] == "unknown"
             assert len(received) == 1

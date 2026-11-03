@@ -89,6 +89,33 @@ SAMPLE_PLAN = {
 class TestIndexRoute:
     """Tests for the page serving the chat UI."""
 
+    def test_index_uses_safe_configured_capability_catalog(
+        self, client: FlaskClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Expose the validator's override catalog without allowing script injection."""
+        catalog_path = tmp_path / "capabilities.json"
+        catalog_path.write_text(
+            json.dumps(
+                {
+                    "KIO7": {
+                        "description": "Custom generator",
+                        "capabilities": [
+                            "custom_review",
+                            "</script><script>alert(1)</script>",
+                        ],
+                    }
+                }
+            )
+        )
+        monkeypatch.setenv("KIO1_CAPABILITIES_PATH", str(catalog_path))
+        response = client.get("/")
+        assert response.status_code == 200
+        assert b'id="capability-catalog" type="application/json"' in response.data
+        assert b"custom_review" in response.data
+        assert b"code_generation" not in response.data
+        assert b"</script><script>alert(1)</script>" not in response.data
+        assert b"\\u003c/script\\u003e" in response.data
+
     def test_index_serves_html(self, client: FlaskClient) -> None:
         """Verify the root route returns the chat UI page."""
         response = client.get("/")

@@ -15,6 +15,7 @@
   const fileInputEls = document.querySelectorAll(".upload-input");
   const uploadStatusEl = document.getElementById("upload-status");
   const sendButtonEl = formEl.querySelector("button[type='submit']");
+  const capabilityCatalog = JSON.parse(document.getElementById("capability-catalog").textContent);
   let activeConversationId = null;
 
   function escapeHtml(value) {
@@ -24,6 +25,11 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#39;");
+  }
+
+  function resizeTaskEditor(editor) {
+    editor.style.height = "auto";
+    editor.style.height = `${Math.min(384, Math.max(56, editor.scrollHeight + 2))}px`;
   }
 
   // Recognizes the KIO1 workflow-plan shape so it can be rendered as step
@@ -42,21 +48,21 @@
     const stepId = escapeHtml(String(step?.step_id ?? index + 1));
     const agentId = escapeHtml(String(step?.agent_id ?? "?"));
     const task = escapeHtml(String(step?.task ?? ""));
-    const capability =
-      step && step.capability
-        ? `<span class="step-capability">${escapeHtml(String(step.capability))}</span>`
-        : "";
+    const selected = Array.isArray(step?.capabilities) ? step.capabilities : [step?.capability];
+    const capabilities = (capabilityCatalog[step?.agent_id]?.capabilities ?? [])
+      .map((capability) => `<label class="step-capability"><input type="checkbox" value="${escapeHtml(capability)}"${selected.includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`)
+      .join("");
 
     return `
-      <li class="plan-step">
+      <li class="plan-step" data-step-index="${index}">
         <span class="step-index">${index + 1}</span>
         <div class="step-body">
           <div class="step-meta">
             <span class="step-agent">${agentId}</span>
-            ${capability}
             <span class="step-id">${stepId}</span>
           </div>
-          <p class="step-task">${task}</p>
+          <textarea class="step-task" aria-label="Task for ${agentId}, step ${stepId}" rows="${Math.min(12, Math.max(2, String(step?.task ?? "").split("\n").length))}" maxlength="16000" required>${task}</textarea>
+          <fieldset class="step-capabilities"><legend>Capabilities</legend>${capabilities}</fieldset>
         </div>
       </li>`;
   }
@@ -69,7 +75,7 @@
         : "";
 
     return `
-      <div class="plan-card">
+      <div class="plan-card" data-plan="${escapeHtml(JSON.stringify(plan))}">
         ${explanation}
         <div class="plan-header">
           <span class="plan-id">${escapeHtml(plan.workflow_id)}</span>
@@ -77,10 +83,25 @@
         </div>
         <ol class="plan-steps">${stepsHtml}</ol>
         ${appShellEl.dataset.workflowEnabled === "true"
-          ? `<button type="button" class="dispatch-plan" data-plan="${escapeHtml(JSON.stringify(plan))}">Run workflow</button>`
+          ? `<button type="button" class="dispatch-plan">Run workflow</button>`
           : ""}
+        <p class="plan-error" role="status" hidden></p>
       </div>
     `;
+  }
+
+  function updateEditedPlan(card) {
+    const plan = JSON.parse(card.dataset.plan);
+    card.querySelectorAll(".plan-step").forEach((element) => {
+      const step = plan.steps[Number(element.dataset.stepIndex)];
+      step.task = element.querySelector(".step-task").value;
+      step.capabilities = Array.from(element.querySelectorAll("input:checked"), (input) => input.value);
+      step.capability = step.capabilities.includes(step.capability)
+        ? step.capability
+        : (step.capabilities[0] ?? "");
+    });
+    card.dataset.plan = JSON.stringify(plan);
+    return plan;
   }
 
   function renderStructuredValue(value, depth = 0) {
@@ -167,6 +188,7 @@
 
     wrapper.append(author, bubble);
     messagesEl.appendChild(wrapper);
+    bubble.querySelectorAll(".step-task").forEach(resizeTaskEditor);
     messagesEl.scrollTop = messagesEl.scrollHeight;
     return wrapper;
   }
@@ -203,8 +225,8 @@
     historySidebarEl.querySelectorAll("button").forEach((button) => {
       button.disabled = isBusy;
     });
-    messagesEl.querySelectorAll(".dispatch-plan").forEach((button) => {
-      button.disabled = isBusy;
+    messagesEl.querySelectorAll(".dispatch-plan, .step-task, .step-capabilities input").forEach((control) => {
+      control.disabled = isBusy;
     });
   }
 
@@ -447,9 +469,33 @@
 
   inputEl.addEventListener("input", resizeInput);
 
+  window.addEventListener("resize", () => {
+    messagesEl.querySelectorAll(".step-task").forEach(resizeTaskEditor);
+  });
+
+  for (const eventName of ["input", "change"]) {
+    messagesEl.addEventListener(eventName, (event) => {
+      if (!event.target.matches(".step-task, .step-capabilities input")) return;
+      if (event.target.matches(".step-task")) resizeTaskEditor(event.target);
+      const card = event.target.closest(".plan-card");
+      updateEditedPlan(card);
+      card.querySelector(".plan-error").hidden = true;
+    });
+  }
+
   messagesEl.addEventListener("click", async (event) => {
     const button = event.target.closest(".dispatch-plan");
     if (!button || button.disabled || inputEl.disabled) return;
+    const card = button.closest(".plan-card");
+    const plan = updateEditedPlan(card);
+    const invalidIndex = plan.steps.findIndex((step) => !step.task.trim() || step.task.length > 16000 || !step.capabilities.length);
+    if (invalidIndex !== -1) {
+      const error = card.querySelector(".plan-error");
+      error.textContent = `Step ${invalidIndex + 1} requires a nonblank task (up to 16000 characters) and at least one capability.`;
+      error.hidden = false;
+      card.querySelectorAll(".plan-step")[invalidIndex].querySelector(".step-task").focus();
+      return;
+    }
     if (!window.confirm("Run this workflow on the configured agent containers? Tasks may change external systems.")) return;
     setInterfaceBusy(true);
     const pending = appendMessage("assistant", { text: "Running workflow..." });
@@ -457,7 +503,7 @@
       const result = await fetchJson("/api/workflows", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ approved: true, plan: JSON.parse(button.dataset.plan) }),
+        body: JSON.stringify({ approved: true, plan }),
       });
       pending.remove();
       appendMessage("assistant", { html: renderGenericJson(result) });

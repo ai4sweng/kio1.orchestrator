@@ -157,6 +157,22 @@ def validate_plan(plan: Any) -> list[dict[str, Any]]:
             raise ValueError("Agent and capability must match the KIO2-KIO13 catalog.")
         if not isinstance(task, str) or not task.strip() or len(task) > 16000:
             raise ValueError("Each task must contain 1-16000 nonblank characters.")
+        capabilities = raw_step.get("capabilities", [capability])
+        if (
+            not isinstance(capabilities, list)
+            or not capabilities
+            or any(
+                not isinstance(selected, str)
+                or selected not in catalog[agent_id]["capabilities"]
+                for selected in capabilities
+            )
+            or len(set(capabilities)) != len(capabilities)
+            or capability not in capabilities
+        ):
+            raise ValueError(
+                "capabilities must be a nonempty, unique list from the agent catalog "
+                "and include capability."
+            )
         if "endpoint" in raw_step:
             raise ValueError("Task endpoints must come from the trusted registry.")
         dependencies = raw_step.get("depends_on", [])
@@ -178,6 +194,11 @@ def validate_plan(plan: Any) -> list[dict[str, Any]]:
                 "step_id": step_id,
                 "agent_id": agent_id,
                 "capability": capability,
+                **(
+                    {"capabilities": list(capabilities)}
+                    if "capabilities" in raw_step
+                    else {}
+                ),
                 "task": task,
                 "data": data,
                 "depends_on": dependencies,
@@ -205,8 +226,9 @@ def _send_task(
 ) -> dict[str, Any]:
     """Send once, bounding response size and rejecting uncorrelated results.
 
-    Prints the outgoing JSON body to stdout before attempting delivery.
-    Authentication headers are not printed.
+    Prints the outgoing JSON body to stdout and logs it before attempting
+    delivery. Task bodies may contain sensitive data; authentication headers
+    are not printed or logged.
 
     Args:
         endpoint: Trusted full HTTP task URL from the agent registry.
@@ -265,6 +287,13 @@ def _send_task(
     )
     try:
         opener = urllib.request.build_opener(_NoRedirect)
+        logger.info(
+            "Task payload before dispatch: workflow_id=%s step_id=%s agent_id=%s payload=%s",
+            payload["workflow_id"],
+            payload["step_id"],
+            payload["agent_id"],
+            encoded.decode("utf-8"),
+        )
         with trace_operation(
             "kio1.workflow.task",
             {
@@ -409,6 +438,11 @@ def dispatch_workflow(plan: Any, registry: dict[str, dict[str, str]]) -> dict[st
                     "step_id": step["step_id"],
                     "agent_id": step["agent_id"],
                     "capability": step["capability"],
+                    **(
+                        {"capabilities": step["capabilities"]}
+                        if "capabilities" in step
+                        else {}
+                    ),
                     "task": step["task"],
                     "data": step["data"],
                     "dependency_results": {

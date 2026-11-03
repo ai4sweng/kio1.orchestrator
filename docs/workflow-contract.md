@@ -24,6 +24,7 @@ Implement `POST /tasks`, receiving `Content-Type: application/json`:
 - Keep `endpoint` out of the payload. KIO1 resolves it from a trusted registry.
 - `schema_version` versions the protocol; reject unsupported versions.
 - Validate `agent_id`, `capability`, `task`, and the agent-specific `data` schema. Code generation is **KIO7**, not KIO10. KIO10 handles TinyML/energy efficiency.
+- Operator-edited plans also include `capabilities`, a nonempty list of unique capability names supported by that agent. `capability` remains the primary selection and must belong to this list; if deselected in the UI, another selected capability becomes primary. Receivers supporting multiple selections must use the full list rather than only `capability`. Legacy plans without the list retain their original single-capability payload. The list and edited task participate in the idempotency digest; the dummy receivers print both unchanged.
 - `data` carries structured inputs, constraints, acceptance criteria, or artifact references. Agree each capability's input/output schema before integration.
 - `dependency_results` maps prerequisite step IDs to their successful `result`. Only KIO1 schedules dependencies; a container executes one task, not the plan.
 - Enforce `deadline_at` (UTC) before starting and during work. KIO1 uses a 60-second socket timeout, not a hard end-to-end execution limit.

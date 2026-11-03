@@ -508,11 +508,47 @@ body {
 }
 
 .step-capability {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 6px;
+  max-width: 100%;
+  cursor: pointer;
+  font-size: 0.75rem;
   color: var(--muted);
   background: var(--surface);
   border: 1px solid var(--border);
   padding: 2px 7px;
   border-radius: 5px;
+}
+
+.step-capability span {
+  overflow-wrap: anywhere;
+}
+
+.step-capability input {
+  flex-shrink: 0;
+  accent-color: var(--accent);
+}
+
+.step-capabilities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border: 0;
+  padding: 0;
+  margin: 8px 0 0;
+  min-width: 0;
+}
+
+.step-capabilities legend {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.plan-error {
+  color: var(--error-text);
+  font-size: 0.85rem;
 }
 
 .step-id {
@@ -521,9 +557,31 @@ body {
 }
 
 .step-task {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 3.5rem;
+  max-height: 24rem;
+  padding: 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  resize: vertical;
   margin: 0;
   font-size: 0.9rem;
   line-height: 1.4;
+}
+
+.step-task:hover {
+  border-color: var(--border);
+}
+
+.step-task:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+  background: var(--surface);
 }
 
 .plan-explanation {

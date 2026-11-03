@@ -25,6 +25,8 @@ Open that address in a browser. Type a request in the message box at the bottom 
 
 Workflow-plan responses are rendered as numbered step cards with the agent, capability, task, and explanation. Other JSON responses are shown as readable labeled fields and lists. Raw model responses are printed in the terminal running KIO1; they are not shown in the dashboard. Invalid JSON is reported as an error in the conversation, with the raw response available in the server terminal.
 
+Click a step's task text to edit it. Each selected KIO shows all capabilities from its catalog as checkboxes, with the LLM's choice selected initially. Select additional capabilities or deselect existing ones before running. Keep at least one selected capability and a nonblank task of at most 16000 characters per step. **Run workflow** uses the current edited text and selections; dependencies and structured inputs remain unchanged. Editors are disabled while requests are in progress. These edits are not saved to chat history: reloading or switching conversations restores the original LLM response.
+
 For each completed inference, the terminal prints labeled blocks in this order: the user's query, the raw LLM response, and the formatted workflow JSON. If the response cannot be formatted, the query and raw response are still printed.
 
 When **Run workflow** dispatches a task, a separate **KIO1 agent payload JSON** block shows the actual request body sent to that KIO, including its inputs and dependency results. These payloads are finalized during execution, not generation; authentication headers are never printed. Terminal output may contain sensitive task data, so redact it before sharing.
