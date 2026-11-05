@@ -63,6 +63,16 @@ pytest tests/ -v
 
 Tests use mocks for the Ollama HTTP API and telemetry exporters, along with temporary directories for file I/O. No running Ollama install or observability service is required for unit testing.
 
+Workflow UI regression tests require Node.js 18+ and no npm packages:
+
+```bash
+source .venv/bin/activate
+node --check static/app.js
+node --test tests/test_ui.js
+```
+
+These tests exercise capability labels, entry deletion, dependency cleanup, preserved edits, dispatch payloads, and busy controls without contacting agents. Run them alongside the Python suite when changing the workflow editor.
+
 The application-docstring regression test inspects every function in the root Python modules, including private helpers and nested route handlers. It requires documented arguments and `Returns:` or `Yields:` sections. New production functions must have focused unit tests; planner tests also cover invalid catalogs, dependency scheduling, transport failures, and disposable local HTTP receivers.
 
 ## Adding a New Module

@@ -32,13 +32,13 @@ def make_plan(mode: str = "sequential") -> dict:
             {
                 "step_id": "s1",
                 "agent_id": "KIO7",
-                "capability": "code_generation",
+                "capability": "generate_code",
                 "task": "Write service",
             },
             {
                 "step_id": "s2",
                 "agent_id": "KIO11",
-                "capability": "validation",
+                "capability": "full_test",
                 "task": "Test service",
             },
         ],
@@ -55,7 +55,7 @@ def test_load_capabilities_default_catalog() -> None:
     """Verify the bundled catalog has all supported agents and capabilities."""
     catalog = load_capabilities()
     assert set(catalog) == {f"KIO{number}" for number in range(2, 14)}
-    assert "code_generation" in catalog["KIO7"]["capabilities"]
+    assert "generate_code" in catalog["KIO7"]["capabilities"]
 
 
 def test_bundled_prompt_expands_shared_catalog() -> None:
@@ -132,7 +132,7 @@ def test_replacement_catalog_controls_prompt_and_validation(
                     "description": "Custom generator",
                     "capabilities": ["custom_codegen"],
                 },
-                "KIO11": {"description": "Tester", "capabilities": ["validation"]},
+                "KIO11": {"description": "Tester", "capabilities": ["full_test"]},
             }
         )
     )
@@ -262,22 +262,22 @@ def test_operator_edits_change_payload_and_idempotency(sender: MagicMock) -> Non
     plan["steps"][0]["data"] = {"artifact": "assets/files/service.py"}
     dispatch_workflow(plan, REGISTRY)
     task_key = sender.call_args_list[2].args[2]["idempotency_key"]
-    plan["steps"][0]["capabilities"] = ["code_generation", "code_understanding"]
+    plan["steps"][0]["capabilities"] = ["generate_code", "check_code_quality"]
     dispatch_workflow(plan, REGISTRY)
     edited = sender.call_args_list[4].args[2]
     assert edited["task"] == plan["steps"][0]["task"]
     assert edited["data"] == plan["steps"][0]["data"]
-    assert edited["capabilities"] == ["code_generation", "code_understanding"]
-    assert edited["capability"] == "code_generation"
+    assert edited["capabilities"] == ["generate_code", "check_code_quality"]
+    assert edited["capability"] == "generate_code"
     assert len({original_key, task_key, edited["idempotency_key"]}) == 3
     assert sender.call_args_list[5].args[2]["dependency_results"] == {
         "s1": {"artifact": "s1"}
     }
-    plan["steps"][0]["capabilities"] = ["code_understanding"]
-    plan["steps"][0]["capability"] = "code_understanding"
+    plan["steps"][0]["capabilities"] = ["check_code_quality"]
+    plan["steps"][0]["capability"] = "check_code_quality"
     dispatch_workflow(plan, REGISTRY)
-    assert sender.call_args_list[6].args[2]["capabilities"] == ["code_understanding"]
-    assert sender.call_args_list[6].args[2]["capability"] == "code_understanding"
+    assert sender.call_args_list[6].args[2]["capabilities"] == ["check_code_quality"]
+    assert sender.call_args_list[6].args[2]["capability"] == "check_code_quality"
 
 
 @pytest.mark.parametrize(
@@ -285,11 +285,11 @@ def test_operator_edits_change_payload_and_idempotency(sender: MagicMock) -> Non
     [
         [],
         None,
-        "validation",
-        ["validation", "validation"],
-        ["validation", "code_generation"],
-        ["validation", {}],
-        ["test_automation"],
+        "full_test",
+        ["full_test", "full_test"],
+        ["full_test", "generate_code"],
+        ["full_test", {}],
+        ["tool_based_test"],
     ],
 )
 @patch("workflow_planner._send_task")
@@ -326,7 +326,7 @@ def test_invalid_plan_never_sends(sender: MagicMock, defect: str) -> None:
     elif defect == "unknown":
         plan["steps"][1]["depends_on"] = ["missing"]
     elif defect == "capability":
-        plan["steps"][1]["capability"] = "code_generation"
+        plan["steps"][1]["capability"] = "generate_code"
     elif defect == "endpoint":
         plan["steps"][1]["endpoint"] = "http://untrusted/tasks"
     elif defect == "duplicate":
@@ -731,14 +731,14 @@ def test_real_http_contract_and_redirect_rejection(
         if edited:
             plan["steps"][0].update(
                 task="Operator's revised task\nPreserve this second line.",
-                capability="code_understanding",
-                capabilities=["code_understanding"],
+                capability="check_code_quality",
+                capabilities=["check_code_quality"],
             )
         result = dispatch_workflow(plan, registry)
         assert received[0]["task"] == plan["steps"][0]["task"]
         if edited:
-            assert received[0]["capabilities"] == ["code_understanding"]
-            assert received[0]["capability"] == "code_understanding"
+            assert received[0]["capabilities"] == ["check_code_quality"]
+            assert received[0]["capability"] == "check_code_quality"
         else:
             assert "capabilities" not in received[0]
         if redirect:

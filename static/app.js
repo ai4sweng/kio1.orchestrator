@@ -50,7 +50,10 @@
     const task = escapeHtml(String(step?.task ?? ""));
     const selected = Array.isArray(step?.capabilities) ? step.capabilities : [step?.capability];
     const capabilities = (capabilityCatalog[step?.agent_id]?.capabilities ?? [])
-      .map((capability) => `<label class="step-capability"><input type="checkbox" value="${escapeHtml(capability)}"${selected.includes(capability) ? " checked" : ""}><span>${escapeHtml(capability)}</span></label>`)
+      .map((capability) => {
+        const label = capability.replace(/_/g, " ");
+        return `<label class="step-capability"><input type="checkbox" value="${escapeHtml(capability)}"${selected.includes(capability) ? " checked" : ""}><span>${escapeHtml(label.charAt(0).toUpperCase() + label.slice(1))}</span></label>`;
+      })
       .join("");
 
     return `
@@ -60,6 +63,9 @@
           <div class="step-meta">
             <span class="step-agent">${agentId}</span>
             <span class="step-id">${stepId}</span>
+            <button type="button" class="delete-step" title="Delete workflow entry" aria-label="Delete ${agentId}, step ${stepId}">
+              <img src="/static/trash-2.svg" width="16" height="16" alt="">
+            </button>
           </div>
           <textarea class="step-task" aria-label="Task for ${agentId}, step ${stepId}" rows="${Math.min(12, Math.max(2, String(step?.task ?? "").split("\n").length))}" maxlength="16000" required>${task}</textarea>
           <fieldset class="step-capabilities"><legend>Capabilities</legend>${capabilities}</fieldset>
@@ -225,7 +231,7 @@
     historySidebarEl.querySelectorAll("button").forEach((button) => {
       button.disabled = isBusy;
     });
-    messagesEl.querySelectorAll(".dispatch-plan, .step-task, .step-capabilities input").forEach((control) => {
+    messagesEl.querySelectorAll(".dispatch-plan, .delete-step, .step-task, .step-capabilities input").forEach((control) => {
       control.disabled = isBusy;
     });
   }
@@ -484,10 +490,39 @@
   }
 
   messagesEl.addEventListener("click", async (event) => {
+    const deleteButton = event.target.closest(".delete-step");
+    if (deleteButton) {
+      if (deleteButton.disabled || inputEl.disabled) return;
+      deleteButton.focus();
+      const card = deleteButton.closest(".plan-card");
+      const plan = updateEditedPlan(card);
+      const index = Number(deleteButton.closest(".plan-step").dataset.stepIndex);
+      const [deletedStep] = plan.steps.splice(index, 1);
+      plan.steps.forEach((step) => {
+        if (Array.isArray(step.depends_on)) {
+          step.depends_on = step.depends_on.filter((dependency) => dependency !== deletedStep.step_id);
+        }
+      });
+      card.dataset.plan = JSON.stringify(plan);
+      card.querySelector(".plan-steps").innerHTML = plan.steps.map(renderPlanStep).join("");
+      card.querySelectorAll(".step-task").forEach(resizeTaskEditor);
+      const error = card.querySelector(".plan-error");
+      error.textContent = plan.steps.length ? "" : "Add a new workflow before running: all entries have been deleted.";
+      error.hidden = Boolean(plan.steps.length);
+      const nextButton = card.querySelectorAll(".delete-step")[Math.min(index, plan.steps.length - 1)];
+      (nextButton ?? card.querySelector(".dispatch-plan") ?? messagesEl).focus();
+      return;
+    }
     const button = event.target.closest(".dispatch-plan");
     if (!button || button.disabled || inputEl.disabled) return;
     const card = button.closest(".plan-card");
     const plan = updateEditedPlan(card);
+    if (!plan.steps.length) {
+      const error = card.querySelector(".plan-error");
+      error.textContent = "Cannot run a workflow with no entries.";
+      error.hidden = false;
+      return;
+    }
     const invalidIndex = plan.steps.findIndex((step) => !step.task.trim() || step.task.length > 16000 || !step.capabilities.length);
     if (invalidIndex !== -1) {
       const error = card.querySelector(".plan-error");

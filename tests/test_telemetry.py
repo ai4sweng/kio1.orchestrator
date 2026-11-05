@@ -85,7 +85,7 @@ def test_interrupted_turn_is_recorded_as_error() -> None:
     )
 
 
-@patch("main.record_gen_ai_response")
+@patch("ai.ollama_client.record_gen_ai_response")
 @patch("main.urllib.request.urlopen")
 def test_ollama_maps_response_telemetry_before_truncation(
     urlopen: MagicMock,

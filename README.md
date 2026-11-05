@@ -26,6 +26,16 @@ pip install -r requirements.txt
 
 Further information about the project is available in the docs folder
 
+## Code Layout
+
+- `main.py` composes application startup and remains the command-line entry point.
+- `ai/` contains the Ollama client; `components/` contains application services such as chat-turn orchestration.
+- `ui/` contains Flask routes. Templates and static assets remain in the root-level `templates/` and `static/` folders.
+- `workflow/` contains plan validation and task dispatch.
+- Root-level configuration, chat history, prompt, formatting, and observability modules provide shared support.
+
+The legacy `webapp` and `workflow_planner` imports remain available as compatibility aliases.
+
 ## Configuration
 
 The model and Ollama endpoint are selected in `config.json`. See [Configuration](docs/configuration.md) for the full field reference.

@@ -507,6 +507,37 @@ body {
   border-radius: 5px;
 }
 
+.delete-step {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+  margin-left: auto;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.delete-step:hover:not(:disabled) {
+  color: var(--error-text);
+  border-color: var(--border);
+}
+
+.delete-step:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.delete-step:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .step-capability {
   display: inline-flex;
   align-items: flex-start;
