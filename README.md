@@ -82,8 +82,7 @@ curl --fail --max-time 5 http://127.0.0.1:11434/api/tags
 2. Prepare persistent directories and build KIO1:
 
 ```bash
-mkdir -p chats logs assets
-docker build -t kio1-orchestrator:latest .
+make prepare kio1-build
 ```
 
 The image runs as UID 1000. These host directories must be writable by that UID and `config.json` must be readable. Create directories before mounting them so Docker does not create them as root. Resolve ownership issues on only these intended paths; do not use `chmod 777` or delete data.
@@ -92,11 +91,7 @@ The image runs as UID 1000. These host directories must be writable by that UID 
 
 ```bash
 export OLLAMA_URL=http://host.docker.internal:11434
-docker run --rm \
-  --add-host=host.docker.internal:host-gateway \
-  -e OLLAMA_URL="$OLLAMA_URL" \
-  --entrypoint python kio1-orchestrator:latest \
-  -c 'import os, urllib.request; print(urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status)'
+make ollama-check OLLAMA_URL="$OLLAMA_URL"
 ```
 
 Continue only if it prints `200`. If the host check succeeds but this fails, see [Ollama connectivity](#ollama-connectivity).
@@ -104,19 +99,10 @@ Continue only if it prints `200`. If the host check succeeds but this fails, see
 4. Launch KIO1 in the same terminal, using the verified `OLLAMA_URL`:
 
 ```bash
-docker run --rm \
-  --name kio1 \
-  --add-host=host.docker.internal:host-gateway \
-  -p 127.0.0.1:5000:5000 \
-  -v "$PWD/config.json:/app/config.json:ro" \
-  -v "$PWD/chats:/app/chats" \
-  -v "$PWD/logs:/app/logs" \
-  -v "$PWD/assets:/app/assets" \
-  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
-  kio1-orchestrator:latest
+make kio1-only-run OLLAMA_URL="$OLLAMA_URL"
 ```
 
-This is a foreground run: keep the terminal open. Wait for model loading and `KIO1 Orchestrator web UI` in the output, then open **http://127.0.0.1:5000**. Press Ctrl+C to stop KIO1. `--rm` removes its container, while chat history, logs, and uploads remain in the mounted directories. Do not add `-d` if you want this attached local workflow.
+This target uses the default Docker network and does not configure an agent registry. Keep the terminal open. Wait for model loading and `KIO1 Orchestrator web UI` in the output, then open **http://127.0.0.1:5000**. Press Ctrl+C to stop and remove the container; chat history, logs, and uploads remain in the mounted directories.
 
 ### AWS Deployment: Background
 
@@ -131,8 +117,7 @@ sudo systemctl enable --now docker
 2. Prepare storage and build KIO1:
 
 ```bash
-mkdir -p chats logs assets
-docker build -t kio1-orchestrator:latest .
+make prepare kio1-build
 ```
 
 The same UID 1000 directory-permission requirements apply on EC2. No Docker Compose stack or agent registry is needed for this deployment.
@@ -141,11 +126,7 @@ The same UID 1000 directory-permission requirements apply on EC2. No Docker Comp
 
 ```bash
 export OLLAMA_URL=http://host.docker.internal:11434
-docker run --rm \
-  --add-host=host.docker.internal:host-gateway \
-  -e OLLAMA_URL="$OLLAMA_URL" \
-  --entrypoint python kio1-orchestrator:latest \
-  -c 'import os, urllib.request; print(urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status)'
+make ollama-check OLLAMA_URL="$OLLAMA_URL"
 ```
 
 Use your verified remote URL instead if applicable. Continue only if this prints `200`.
@@ -153,25 +134,15 @@ Use your verified remote URL instead if applicable. Continue only if this prints
 4. Launch detached KIO1. If `kio1` already exists, first follow [Rebuild and replace](#rebuild-and-replace), preserving its data:
 
 ```bash
-docker run -d \
-  --name kio1 \
-  --restart unless-stopped \
-  --add-host=host.docker.internal:host-gateway \
-  -p 127.0.0.1:5000:5000 \
-  -v "$PWD/config.json:/app/config.json:ro" \
-  -v "$PWD/chats:/app/chats" \
-  -v "$PWD/logs:/app/logs" \
-  -v "$PWD/assets:/app/assets" \
-  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
-  kio1-orchestrator:latest
+make kio1-only-up OLLAMA_URL="$OLLAMA_URL"
 ```
 
-`-d` runs independently of SSH. `--restart unless-stopped` allows recovery after process exits and Docker/host restarts, provided Docker starts and you did not deliberately stop the container. Do not combine `--rm` with `--restart`. All Docker options belong before the image name.
+This target runs independently of SSH and uses `--restart unless-stopped`, allowing recovery after process exits and Docker/host restarts, provided Docker starts and you did not deliberately stop the container.
 
 5. Check startup on EC2:
 
 ```bash
-docker logs -f kio1
+make kio1-logs
 ```
 
 Wait for model loading and the UI startup message, then press Ctrl+C to leave the log viewer. The detached container keeps running. Check the UI on EC2:
@@ -193,11 +164,11 @@ You can close all SSH terminals after startup. Ollama must also remain running a
 After reconnecting, inspect KIO1 and follow logs:
 
 ```bash
-docker ps --filter name=kio1
-docker logs -f kio1
+make kio1-status
+make kio1-logs
 ```
 
-Ctrl+C stops only the log viewer. Deliberately stop with `docker stop kio1` and resume with `docker start kio1`. Do not stop it just to log out. An `unhealthy` status alone does not cause an automatic restart.
+Ctrl+C stops only the log viewer. Deliberately stop with `make kio1-stop` and resume with `make kio1-start`. Do not stop it just to log out. An `unhealthy` status alone does not cause an automatic restart.
 
 ### Ollama Connectivity
 
@@ -225,26 +196,26 @@ sudo systemctl daemon-reload
 sudo systemctl restart ollama
 ```
 
-If you run Ollama manually, set the same `OLLAMA_HOST` value in its environment before starting `ollama serve`; do not start a second server on an occupied port. Repeat the host and Docker connectivity checks. If Ollama is already containerized, use its actual DNS name on a Docker network shared with KIO1 and add that network to both the check and launch commands; do not assume a container called `ollama` exists.
+If you run Ollama manually, set the same `OLLAMA_HOST` value in its environment before starting `ollama serve`; do not start a second server on an occupied port. Repeat the host and Docker connectivity checks. If Ollama is already containerized, use its actual DNS name and the shared Docker network for both targets, for example `make ollama-check OLLAMA_URL=http://ollama:11434 KIO1_NETWORK=your-network` and `make kio1-only-run OLLAMA_URL=http://ollama:11434 KIO1_NETWORK=your-network`. Do not assume a container called `ollama` exists.
 
-KIO1 loads its model before starting Flask. A bad endpoint or missing model can prevent the UI from starting and cause nginx 502. Inspect `docker logs kio1` first; if EC2's local UI check succeeds but the public URL fails, inspect nginx's upstream separately. Slow model loading may temporarily make the container unhealthy.
+KIO1 loads its model before starting Flask. A bad endpoint or missing model can prevent the UI from starting and cause nginx 502. Inspect `make kio1-logs` first; if EC2's local UI check succeeds but the public URL fails, inspect nginx's upstream separately. Slow model loading may temporarily make the container unhealthy.
 
 ### Rebuild and Replace
 
 Rebuild after changes to application source, UI files, `requirements.txt`, or `Dockerfile`:
 
 ```bash
-docker build -t kio1-orchestrator:latest .
+make kio1-build
 ```
 
 Building does not update existing containers. After the new image's Ollama check succeeds, stop and preserve an existing named container:
 
 ```bash
-docker stop kio1
+make kio1-stop
 docker rename kio1 "kio1-previous-$(date +%Y%m%d-%H%M%S)"
 ```
 
-Skip the rename for a foreground container created with `--rm`; it is already removed when stopped. Substitute the actual name if different. Rerun the local or AWS launch command with the same host directories and verified endpoint. `docker restart kio1` alone still runs the old image. Do not delete mounted data or prune unrelated containers. If port 5000 remains occupied, identify the other listener before stopping any unrelated process.
+Skip the rename for a foreground container created with `--rm`; it is already removed when stopped. Substitute the actual name if different. Relaunch locally with `make kio1-only-run OLLAMA_URL="$OLLAMA_URL"` or on AWS with `make kio1-only-up OLLAMA_URL="$OLLAMA_URL"`. These targets preserve the data mounts. `docker restart kio1` alone still runs the old image. Do not delete mounted data or prune unrelated containers. If port 5000 remains occupied, identify the other listener before stopping any unrelated process.
 
 ## Observability
 

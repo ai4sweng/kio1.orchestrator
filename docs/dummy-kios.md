@@ -19,39 +19,32 @@ Use two terminals in the same repository. Keep both open while testing. These ru
 
 ### 1. Build Both Images
 
-In terminal 1:
+In terminal 1, from the repository root:
 
 ```bash
-mkdir -p chats logs assets
-docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
-docker compose -f dummy_kios/compose.yaml build
-docker build -t kio1-orchestrator:latest .
+make docker-build
 ```
 
-Compose builds `kio-dummy:latest`. Only `kio2` declares the build; all twelve services reuse that image with different `KIO_AGENT_ID` values. The second build creates the separate KIO1 image. No Python virtual environment is required for Docker builds.
+This builds `kio-dummy:latest` and `kio1-orchestrator:latest`. Only `kio2` declares the dummy build; all twelve services reuse that image with different `KIO_AGENT_ID` values. No Python virtual environment is required for Docker builds.
 
 ### 2. Start All Dummy Agents
 
 Keep terminal 1 open:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml up --no-log-prefix --no-color
+make dummy-up
 ```
 
-Do not add `-d` for this foreground setup. Empty receiver logs are normal until tasks arrive. Compose may still print its own container lifecycle messages. Stop an old standalone `kio3` container if it shares this network; its DNS name can conflict with the Compose service.
+This foreground target creates the shared network if needed. Empty receiver logs are normal until tasks arrive. Compose may still print its own container lifecycle messages. Stop an old standalone `kio3` container if it shares this network; its DNS name can conflict with the Compose service.
 
 ### 3. Verify Connectivity
 
 In terminal 2, from the same repository root:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml ps
 export OLLAMA_URL=http://host.docker.internal:11434
-docker run --rm --network kio1-network \
-  --add-host=host.docker.internal:host-gateway \
-  -e OLLAMA_URL="$OLLAMA_URL" \
-  --entrypoint python kio1-orchestrator:latest \
-  -c 'import os, urllib.request; print("Ollama:", urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status); print("KIO7:", urllib.request.urlopen("http://kio7:8000/health", timeout=5).status)'
+make dummy-status
+make docker-check OLLAMA_URL="$OLLAMA_URL"
 ```
 
 Wait until all twelve services are healthy. The check must print `Ollama: 200` and `KIO7: 200`. If needed, repeat it after startup. For remote Ollama, set `OLLAMA_URL` to its verified base URL without a trailing slash before the check. Do not continue after a failed check; see [Troubleshooting](#troubleshooting).
@@ -61,27 +54,15 @@ Wait until all twelve services are healthy. The check must print `Ollama: 200` a
 In terminal 2, with the same `OLLAMA_URL`:
 
 ```bash
-docker run --rm \
-  --name kio1 \
-  --network kio1-network \
-  --add-host=host.docker.internal:host-gateway \
-  -p 127.0.0.1:5000:5000 \
-  -v "$PWD/config.json:/app/config.json:ro" \
-  -v "$PWD/chats:/app/chats" \
-  -v "$PWD/logs:/app/logs" \
-  -v "$PWD/assets:/app/assets" \
-  -v "$PWD/dummy_kios/agents.dummy.json:/app/agents.dummy.json:ro" \
-  -e KIO1_AGENT_CONFIG=/app/agents.dummy.json \
-  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
-  kio1-orchestrator:latest
+make kio1-run OLLAMA_URL="$OLLAMA_URL"
 ```
 
 Keep terminal 2 open. Wait for model loading and `KIO1 Orchestrator web UI` in the startup output, then open **http://127.0.0.1:5000**. Generate a workflow, edit its task text or capability selections if needed, then click **Run workflow** and confirm. Generation alone sends nothing. Terminal 1 prints the edited JSON received by selected agents. The UI's `dummy: true` and `received: true` confirm delivery, not execution.
 
-Ctrl+C in terminal 2 stops KIO1, and `--rm` removes its container, not mounted files. Ctrl+C in terminal 1 stops the dummy agents. Remove their stopped containers later with:
+The target prepares the host directories and shared network. Ctrl+C in terminal 2 stops and removes the KIO1 container, not mounted files. Ctrl+C in terminal 1 stops the dummy agents. Remove their stopped containers later with:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml down
+make dummy-down
 ```
 
 This leaves the external shared network and KIO1's mounted data intact.
@@ -101,17 +82,16 @@ sudo systemctl enable --now docker
 Then prepare storage and build both images:
 
 ```bash
-mkdir -p chats logs assets
-docker network inspect kio1-network >/dev/null 2>&1 || docker network create kio1-network
-docker compose -f dummy_kios/compose.yaml build
-docker build -t kio1-orchestrator:latest .
+make docker-build
 ```
+
+The launch targets create the host directories and shared network when needed.
 
 ### 2. Start Dummy Agents in the Background
 
 ```bash
-docker compose -f dummy_kios/compose.yaml up -d --wait
-docker compose -f dummy_kios/compose.yaml ps
+make dummy-up-detached
+make dummy-status
 ```
 
 All twelve services must be healthy. `-d` detaches them from SSH; the Compose file already sets `restart: unless-stopped` on every service.
@@ -122,11 +102,7 @@ The default uses Ollama on the EC2 host. Substitute your verified remote base UR
 
 ```bash
 export OLLAMA_URL=http://host.docker.internal:11434
-docker run --rm --network kio1-network \
-  --add-host=host.docker.internal:host-gateway \
-  -e OLLAMA_URL="$OLLAMA_URL" \
-  --entrypoint python kio1-orchestrator:latest \
-  -c 'import os, urllib.request; print("Ollama:", urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status); print("KIO7:", urllib.request.urlopen("http://kio7:8000/health", timeout=5).status)'
+make docker-check OLLAMA_URL="$OLLAMA_URL"
 ```
 
 Continue only after both checks print `200`. Confirm connectivity before stopping an existing working KIO1 deployment.
@@ -136,30 +112,17 @@ Continue only after both checks print `200`. Confirm connectivity before stoppin
 If a container named `kio1` already exists, follow [Replacing KIO1](#replacing-kio1) first. Retain its configuration and data mounts.
 
 ```bash
-docker run -d \
-  --name kio1 \
-  --restart unless-stopped \
-  --network kio1-network \
-  --add-host=host.docker.internal:host-gateway \
-  -p 127.0.0.1:5000:5000 \
-  -v "$PWD/config.json:/app/config.json:ro" \
-  -v "$PWD/chats:/app/chats" \
-  -v "$PWD/logs:/app/logs" \
-  -v "$PWD/assets:/app/assets" \
-  -v "$PWD/dummy_kios/agents.dummy.json:/app/agents.dummy.json:ro" \
-  -e KIO1_AGENT_CONFIG=/app/agents.dummy.json \
-  -e KIO1_OLLAMA_ENDPOINT="$OLLAMA_URL" \
-  kio1-orchestrator:latest
+make kio1-up OLLAMA_URL="$OLLAMA_URL"
 ```
 
-All Docker options belong before the image name. Do not combine `--rm` with `--restart`.
+This target uses `--restart unless-stopped`; do not combine `--rm` with that policy.
 
 ### 5. Check Startup and Open the UI
 
 On EC2, follow startup:
 
 ```bash
-docker logs -f kio1
+make kio1-logs
 ```
 
 Wait for model loading and the UI startup message. Press Ctrl+C to leave the log viewer; the detached container keeps running. Then check the UI on EC2:
@@ -185,17 +148,17 @@ After startup you can close every SSH terminal. KIO1 and the dummy agents remain
 After reconnecting, inspect state:
 
 ```bash
-docker ps
-docker compose -f dummy_kios/compose.yaml ps
+make kio1-status
+make dummy-status
 ```
 
 Watch task bodies:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml logs -f --no-log-prefix --no-color
+make dummy-logs
 ```
 
-Add `--tail 0` for only new messages, or append `kio7` to watch that receiver alone. View KIO1 logs with `docker logs -f kio1` in another terminal. Ctrl+C stops only a log viewer.
+To show only new messages, use `docker compose -f dummy_kios/compose.yaml logs -f --tail 0 --no-log-prefix --no-color`; append `kio7` to watch that receiver alone. View KIO1 logs with `make kio1-logs` in another terminal. Ctrl+C stops only a log viewer.
 
 KIO1 also saves the complete outgoing task JSON in its mounted session log under `logs/log_<session-id>.log`, immediately before each dispatch. Search it with `rg 'Task payload before dispatch' logs/log_*.log`. Each entry identifies the workflow, step, and KIO and includes edited task text, selected capabilities, input data, and dependency results. This records an attempted send, not confirmed receipt. Authentication headers are excluded, but task contents are not redacted; use synthetic data and protect these files. Unlike container logs, these mounted files survive container removal.
 
@@ -208,7 +171,7 @@ Do not run `stop` or `down` when logging out. `unless-stopped` supports recovery
 Rebuild after application, UI, dependency, or Dockerfile changes:
 
 ```bash
-docker build -t kio1-orchestrator:latest .
+make kio1-build
 ```
 
 An image build does not update an existing container. Verify connectivity, then preserve an existing named container before launching its replacement:
@@ -218,30 +181,30 @@ docker stop kio1
 docker rename kio1 "kio1-previous-$(date +%Y%m%d-%H%M%S)"
 ```
 
-Skip the rename for a foreground container started with `--rm`, because stopping removes it automatically. Substitute the actual name if your previous container is not called `kio1`. Run the appropriate local or AWS launch command with the same host data mounts. `docker restart kio1` alone still uses the old image. Do not delete mounted data or prune unrelated containers.
+Skip the rename for a foreground container started with `--rm`, because stopping removes it automatically. Substitute the actual name if your previous container is not called `kio1`. Start the replacement with `make kio1-run OLLAMA_URL="$OLLAMA_URL"` locally or `make kio1-up OLLAMA_URL="$OLLAMA_URL"` on AWS; both targets retain the configured mounts. `docker restart kio1` alone still uses the old image. Do not delete mounted data or prune unrelated containers.
 
 ### Rebuilding Receivers
 
 After changing receiver code:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml build
+make dummy-build
 ```
 
-For local use, stop the foreground Compose run and rerun the local `up` command. For AWS:
+For local use, stop the foreground Compose run and rerun `make dummy-up`. For AWS:
 
 ```bash
-docker compose -f dummy_kios/compose.yaml up -d --wait
+make dummy-up-detached
 ```
 
 To deliberately stop AWS services without removing containers:
 
 ```bash
 docker stop kio1
-docker compose -f dummy_kios/compose.yaml stop
+make dummy-stop
 ```
 
-Resume with `docker start kio1` and `docker compose -f dummy_kios/compose.yaml up -d --wait`. Compose `down` removes dummy containers and their container logs but leaves KIO1 and the external network intact.
+Resume with `make kio1-start` and `make dummy-up-detached`. `make dummy-down` removes dummy containers and their container logs but leaves KIO1 and the external network intact.
 
 ## Troubleshooting
 

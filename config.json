@@ -5,7 +5,7 @@
     "temperature": 0.2,
     "request_timeout": 120,
     "keep_alive": -1,
-    "max_output_tokens": 4096,
+    "max_output_tokens": 8192,
     "endpoint": "http://localhost:11434",
     "context_window_size": 16384,
     "telemetry": {

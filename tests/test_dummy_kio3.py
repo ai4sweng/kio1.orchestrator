@@ -9,8 +9,8 @@ from http.server import ThreadingHTTPServer
 from unittest.mock import patch
 
 import pytest
-
 from dummy_kio3.server import DummyKIO3Handler, main
+
 from workflow_planner import dispatch_workflow
 
 
