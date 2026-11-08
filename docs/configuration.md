@@ -2,7 +2,7 @@
 
 ## Optional Agent Routing
 
-Container dispatch is disabled unless `KIO1_AGENT_CONFIG` points to a trusted registry file. Copy `agents.example.json`, replace endpoints with real task URLs, and keep only configured agents. This is separate from the Ollama configuration.
+Container launches through `make run` and `make up` use `agents.example.json` by default, enabling dispatch to the KIO2-KIO13 dummy receivers. Override `AGENT_CONFIG` with a trusted registry path to use different agents, or set `AGENT_CONFIG=` to disable dispatch. Local `python main.py` does not automatically load the example registry; set `KIO1_AGENT_CONFIG` explicitly if local workflow dispatch is needed. This is separate from the Ollama configuration.
 
 ```json
 {
@@ -13,7 +13,7 @@ Container dispatch is disabled unless `KIO1_AGENT_CONFIG` points to a trusted re
 }
 ```
 
-`token_env` is optional; when present its environment variable must be nonempty. Never store token values in the registry or model output. In Docker, mount the registry read-only and set `KIO1_AGENT_CONFIG` to its container path. All agents selected by a plan must have registry entries before any task can run. See the [container contract](workflow-contract.md) for scheduling and security details.
+`token_env` is optional; when present its environment variable must be nonempty. Never store token values in the registry or model output. In Docker, Make mounts the selected registry read-only and sets `KIO1_AGENT_CONFIG` to its container path. All agents selected by a plan must have registry entries before any task can run. See the [container contract](workflow-contract.md) for scheduling and security details.
 
 ## Shared Capability Catalog
 

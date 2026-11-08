@@ -86,45 +86,48 @@ SAMPLE_PLAN = {
 }
 
 
-class TestIndexRoute:
-    """Tests for the page serving the chat UI."""
+class TestSettingsRoute:
+    """Public UI configuration uses the same catalog as workflow validation."""
 
-    def test_index_uses_safe_configured_capability_catalog(
+    def test_settings_exposes_only_public_fields(
+        self, client: FlaskClient, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Return presentation settings without endpoint or token configuration."""
+        monkeypatch.delenv("KIO1_AGENT_CONFIG", raising=False)
+        response = client.get("/api/settings")
+        assert response.status_code == 200
+        settings = response.get_json()
+        assert set(settings) == {"model_name", "workflow_enabled", "capability_catalog"}
+        assert settings["model_name"] == "test-model"
+        assert settings["workflow_enabled"] is False
+        assert "KIO7" in settings["capability_catalog"]
+        monkeypatch.setenv("KIO1_AGENT_CONFIG", "agents.json")
+        assert client.get("/api/settings").get_json()["workflow_enabled"] is True
+
+    def test_settings_uses_catalog_override(
         self, client: FlaskClient, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Expose the validator's override catalog without allowing script injection."""
+        """Serve a configured catalog rather than a duplicated UI capability map."""
+        catalog = {"KIO7": {"description": "Custom", "capabilities": ["custom_review"]}}
         catalog_path = tmp_path / "capabilities.json"
-        catalog_path.write_text(
-            json.dumps(
-                {
-                    "KIO7": {
-                        "description": "Custom generator",
-                        "capabilities": [
-                            "custom_review",
-                            "</script><script>alert(1)</script>",
-                        ],
-                    }
-                }
-            )
-        )
+        catalog_path.write_text(json.dumps(catalog))
         monkeypatch.setenv("KIO1_CAPABILITIES_PATH", str(catalog_path))
-        response = client.get("/")
-        assert response.status_code == 200
-        assert b'id="capability-catalog" type="application/json"' in response.data
-        assert b"custom_review" in response.data
-        assert b"code_generation" not in response.data
-        assert b"</script><script>alert(1)</script>" not in response.data
-        assert b"\\u003c/script\\u003e" in response.data
+        assert client.get("/api/settings").get_json()["capability_catalog"] == catalog
 
-    def test_index_serves_html(self, client: FlaskClient) -> None:
-        """Verify the root route returns the chat UI page."""
-        response = client.get("/")
 
+class TestHealthRoute:
+    """KIO1 serves health and API routes, not the separately hosted browser UI."""
+
+    def test_health_reports_started_api(self, client: FlaskClient) -> None:
+        """Report API availability without invoking model generation."""
+        response = client.get("/health")
         assert response.status_code == 200
-        assert b"<html" in response.data
-        assert b"What can I help with?" in response.data
-        assert b"test-model" in response.data
-        assert b'aria-label="Conversation"' in response.data
+        assert response.get_json() == {"status": "ok", "service": "kio1"}
+
+    def test_ui_assets_are_not_served_by_kio1(self, client: FlaskClient) -> None:
+        """Keep presentation ownership in the standalone UI project."""
+        assert client.get("/").status_code == 404
+        assert client.get("/static/app.js").status_code == 404
 
 
 class TestChatRoute:

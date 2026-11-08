@@ -130,7 +130,7 @@ Every span and metric also carries the resource attributes `kio.id` and `deploym
 
 | OpenTelemetry metric | Description |
 |----------------------|-------------|
-| `kio1.sessions.started` | Sessions that started the web UI |
+| `kio1.sessions.started` | Sessions that started the operator API |
 | `kio1.sessions.completed` | Sessions that completed after the web server stopped |
 | `kio1.turns` | User turns processed |
 | `kio1.turn.duration` | End-to-end turn duration |

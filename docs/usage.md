@@ -12,16 +12,16 @@ On startup, the orchestrator:
 2. Reads the system prompt
 3. Preloads the configured model into Ollama using the configured `keep_alive`
 4. Creates a new chat session file
-5. Starts the web UI
+5. Starts the operator API
 
 ## Using the Web UI
 
 ```
 Loading Ollama model ministral-3:8b...
-KIO1 Orchestrator web UI: http://127.0.0.1:5000
+KIO1 Orchestrator API: http://127.0.0.1:5000
 ```
 
-Open that address in a browser. Type a request in the message box at the bottom and press Enter (or click Send). The orchestrator sends it to Ollama and renders the response in the conversation. The input is ready for another query when the response completes.
+That startup URL is the API, not a browser page. Start the independent UI container as described in [Independent Deployment](deployment.md), then open its published `http://127.0.0.1:5000` address. Type a request and click Send. UI proxies to KIO1, which sends it to Ollama and returns the response. The input is ready for another query when the response completes.
 
 Workflow-plan responses are rendered as numbered step cards with the agent, capability, task, and explanation. Other JSON responses are shown as readable labeled fields and lists. Raw model responses are printed in the terminal running KIO1; they are not shown in the dashboard. Invalid JSON is reported as an error in the conversation, with the raw response available in the server terminal.
 
@@ -37,7 +37,7 @@ Use the trash icon beside a saved conversation and confirm to permanently delete
 
 Each chat is saved as a JSONL file in the configured chat directory. User and assistant messages are restored when a saved conversation is opened; the system prompt is kept out of the browser and supplied separately to the model.
 
-Override the bind address with the `KIO1_WEB_HOST` and `KIO1_WEB_PORT` environment variables, for example to expose the UI on all interfaces:
+Override the API bind address with `KIO1_WEB_HOST` and `KIO1_WEB_PORT` when needed. These do not configure the independent UI's published port. Restrict any host API listener to trusted clients:
 
 ```bash
 KIO1_WEB_HOST=0.0.0.0 KIO1_WEB_PORT=8080 python main.py
@@ -57,7 +57,7 @@ Use the Model, Dataset, or File buttons next to the message box to upload a mode
 
 The dashboard presents this as a workflow summary with numbered agent steps and an explanation. The raw JSON is printed to the server terminal and saved as the assistant message in the chat history. Generating a plan does not execute it.
 
-To enable execution, configure `agents.json` using `agents.example.json`, set `KIO1_AGENT_CONFIG=agents.json`, and restart KIO1. Select **Run workflow** and confirm. The planner validates the complete plan before sending tasks; successful dependency results are forwarded to dependent steps. Failed or unknown outcomes stop new dispatches. Results are displayed but are not persisted in chat history. See the [container contract](workflow-contract.md) for setup and limitations.
+Container deployments started with `make run` or `make up` use the bundled dummy registry by default, so **Run workflow** is available when the UI loads. Start dummy-kios to receive tasks. For another trusted registry, set `AGENT_CONFIG=agents.json`; recreate KIO1 after changing its registry. Local `python main.py` requires `KIO1_AGENT_CONFIG` to be set explicitly. Select **Run workflow** and confirm. The planner validates the complete plan before sending tasks; successful dependency results are forwarded to dependent steps. Failed or unknown outcomes stop new dispatches. Results are displayed but are not persisted in chat history. See the [container contract](workflow-contract.md) for setup and limitations.
 
 ### Bug fix request
 
@@ -87,4 +87,3 @@ Close the browser tab, or stop the server with `Ctrl+C` in the terminal running 
 ## Chat History Files
 
 Each conversation produces a JSONL file in the configured chat directory. See [Chat History Format](chat-history.md) for details.
-

@@ -1,8 +1,4 @@
-"""Flask web UI: a messenger-style chat backed by the Ollama orchestrator.
-
-Replaces the terminal REPL in `main.py` with a browser UI. The UI also
-accepts model/dataset/file uploads, saved under `assets/<category>/`.
-"""
+"""Flask API for chat, conversation storage, uploads, and workflow dispatch."""
 
 import json
 import logging
@@ -14,7 +10,7 @@ from datetime import datetime, timezone
 from formatter import format_json
 from pathlib import Path
 
-from flask import Flask, Response, jsonify, render_template, request
+from flask import Flask, Response, jsonify, request
 from werkzeug.utils import secure_filename
 
 from chat_history import create_chat_file, load_messages
@@ -145,7 +141,7 @@ def create_app(
     chat_file: Path,
     session_id: str,
 ) -> Flask:
-    """Build the Flask application serving the chat UI and upload endpoint.
+    """Build the Flask application serving the operator API.
 
     Args:
         config: Application configuration.
@@ -156,29 +152,35 @@ def create_app(
     Returns:
         A configured Flask application.
     """
-    app = Flask(
-        __name__,
-        template_folder="../templates",
-        static_folder="../static",
-    )
+    app = Flask(__name__, static_folder=None)
     app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 
     session = _ChatSession(config, system_prompt, chat_file, session_id)
     workflow_lock = threading.Lock()
 
-    @app.get("/")
-    def index() -> str:
-        """Render the operator's chat page.
+    @app.get("/api/settings")
+    def settings() -> Response:
+        """Return public presentation settings without exposing credentials.
 
         Returns:
-            HTML with the configured model name and workflow-enabled flag.
+            JSON model name, dispatch flag, and the configured capability catalog.
         """
-        return render_template(
-            "index.html",
-            model_name=session.config.model,
-            workflow_enabled=bool(os.environ.get("KIO1_AGENT_CONFIG")),
-            capability_catalog=load_capabilities(),
+        return jsonify(
+            {
+                "model_name": session.config.model,
+                "workflow_enabled": bool(os.environ.get("KIO1_AGENT_CONFIG")),
+                "capability_catalog": load_capabilities(),
+            }
         )
+
+    @app.get("/health")
+    def health() -> Response:
+        """Report that startup completed and the API is serving requests.
+
+        Returns:
+            JSON service health; this does not probe Ollama or receiver health.
+        """
+        return jsonify({"status": "ok", "service": "kio1"})
 
     @app.post("/api/workflows")
     def execute_workflow() -> tuple[Response, int] | Response:

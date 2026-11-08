@@ -26,8 +26,7 @@ from session_logger import generate_session_id, init_logger
     sorted(
         [
             *Path(__file__).parent.parent.glob("*.py"),
-            *(Path(__file__).parent.parent / "dummy_kio3").glob("*.py"),
-            *(Path(__file__).parent.parent / "dummy_kios").glob("*.py"),
+            *(Path(__file__).parent.parent / "api").glob("*.py"),
         ]
     ),
 )

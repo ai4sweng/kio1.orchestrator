@@ -27,7 +27,8 @@ ollama pull ministral-3:8b
 
 ```
 main.py              - Entry point (startup, run_turn() turn logic, Ollama request/response handling)
-webapp.py            - Flask web UI (saved conversations, chat, and file-upload routes)
+api/webapp.py        - Flask API (settings, health, conversations, chat, uploads, workflows)
+webapp.py            - Backward-compatible API import
 config_loader.py     - Configuration loading
 prompt_loader.py     - Shared capability loader and system prompt renderer
 capabilities.json    - Replaceable agent descriptions and capability names
@@ -36,7 +37,6 @@ chat_history.py      - JSONL conversation persistence
 formatter.py         - JSON normalization for structured browser rendering
 session_logger.py    - Per-session log setup and duration measurement
 telemetry.py         - OpenTelemetry tracing and metrics
-templates/, static/  - Chat UI markup, styling, and client-side rendering
 config.json          - Application settings
 requirements.txt     - Runtime dependencies (installed in the Docker image)
 requirements-dev.txt - Adds testing/formatting/linting tools on top
@@ -63,19 +63,15 @@ pytest tests/ -v
 
 Tests use mocks for the Ollama HTTP API and telemetry exporters, along with temporary directories for file I/O. No running Ollama install or observability service is required for unit testing.
 
-Workflow UI regression tests require Node.js 18+ and no npm packages:
+Browser assets and Node tests belong to the independent UI project; receiver implementation and tests belong to dummy-kios. Each project's README describes its own quality gate. KIO1 does not import either project. For optional end-to-end container verification use `make test-stack` with explicit UI and dummy source paths and three independently built test images.
 
-```bash
-source .venv/bin/activate
-node --check static/app.js
-node --test tests/test_ui.js
-```
-
-These tests exercise capability labels, entry deletion, dependency cleanup, preserved edits, dispatch payloads, and busy controls without contacting agents. Run them alongside the Python suite when changing the workflow editor.
-
-The application-docstring regression test inspects every function in the root Python modules, including private helpers and nested route handlers. It requires documented arguments and `Returns:` or `Yields:` sections. New production functions must have focused unit tests; planner tests also cover invalid catalogs, dependency scheduling, transport failures, and disposable local HTTP receivers.
+The application-docstring regression test inspects root modules and the API package, including private helpers and nested routes. It requires documented arguments and `Returns:` or `Yields:` sections. New production functions need focused tests. Planner tests cover invalid catalogs, dependency scheduling, transport failures, and disposable local HTTP receivers. Read [Project Split](project-split.md) for original test ownership.
 
 ## Adding a New Module
+
+Keep model access in `ai`, turn orchestration in `components`, API handling in `api`, and workflow validation/dispatch in `workflow`. Root `webapp` and `workflow_planner` remain compatibility imports; do not duplicate logic there. Keep schemas, state, storage, capabilities, and trusted registry validation in KIO1. Do not import sibling projects or add UI dependencies to this image.
+
+Preserve single-process state and locks, explicit operator approval, uncertainty handling, request bounds, and telemetry redaction. Do not add workers, automatic workflow retries, or real UAV actuation during infrastructure changes. Use focused tests before full `make ci`. Configuration and tokens must not enter image layers.
 
 1. Create the module file at the project root.
 2. Import and use it from `main.py`.
@@ -107,7 +103,7 @@ All tools are installed as part of `make install` and wired to `make` targets:
 | `make check` | ruff + mypy | All static checks combined |
 | `make test` | pytest | Run test suite |
 | `make test-cov` | pytest-cov | Run tests with coverage report |
-| `make ci` | format + ruff + mypy + pytest | Full pipeline — run before pushing |
+| `make ci` | format-check + ruff + mypy + pytest | Non-mutating quality gate before pushing |
 | `make clean` | — | Remove caches and build artefacts |
 
 Run `make help` to see all targets.

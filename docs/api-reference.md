@@ -128,11 +128,12 @@ Loads configuration, preloads the model, creates the session's chat file, then b
 
 ### `create_app(config, system_prompt, chat_file, session_id) -> Flask`
 
-Builds the Flask application serving the chat UI. Routes:
+Builds the Flask API in `api.webapp`, available through the root `webapp` compatibility import. The independent UI serves the browser page and proxies API requests. Routes:
 
 | Route | Method | Description |
 |-------|--------|-------------|
-| `/` | GET | Serves the chat UI page |
+| `/health` | GET | Reports a started KIO1 API; does not probe model or receiver readiness |
+| `/api/settings` | GET | Returns `model_name`, `workflow_enabled`, and `capability_catalog`; excludes credentials and model endpoint |
 | `/api/conversations` | GET | Lists saved conversations by their first user query and update date, and returns the active conversation ID; system prompts and message bodies are not included |
 | `/api/conversations` | POST | Creates and activates a new conversation with the configured system prompt |
 | `/api/conversations/<conversation_id>/activate` | POST | Activates a saved conversation and returns its user/assistant messages, excluding the system prompt |

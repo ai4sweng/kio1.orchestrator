@@ -9,6 +9,7 @@ from ai.ollama_client import (
     preload_model,
     send_request,
 )
+from api.webapp import create_app
 from chat_history import create_chat_file
 from components.chat_service import run_turn
 from config_loader import load_config
@@ -22,7 +23,6 @@ from telemetry import (
     trace_operation,
     trace_provider_preload,
 )
-from ui.webapp import create_app
 
 logger = logging.getLogger("main")
 __all__ = [
@@ -37,7 +37,7 @@ __all__ = [
 
 
 def main() -> None:
-    """Load configuration, preload the model, and serve the web UI.
+    """Load configuration, preload the model, and serve the operator API.
 
     Args:
         None. Reads config.json and KIO1 environment overrides at startup.
@@ -100,7 +100,7 @@ def main() -> None:
     host = os.environ.get("KIO1_WEB_HOST", "127.0.0.1")
     port = int(os.environ.get("KIO1_WEB_PORT", "5000"))
 
-    print(f"KIO1 Orchestrator web UI: http://{host}:{port}")
+    print(f"KIO1 Orchestrator API: http://{host}:{port}")
 
     session_success = False
     with measure_duration() as session_elapsed:

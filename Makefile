@@ -4,33 +4,26 @@ VENV        := .venv
 PYTHON      := $(VENV)/bin/python
 PIP         := $(PYTHON) -m pip
 BOOTSTRAP_PYTHON ?= python3
-SOURCES     := *.py ai/ components/ ui/ workflow/ dummy_kios/ tests/
-MYPY_SOURCES := $(filter-out tests/test_dummy_kio3.py,$(wildcard *.py ai/*.py components/*.py ui/*.py workflow/*.py dummy_kios/*.py tests/*.py))
-TESTS       := $(filter-out tests/test_dummy_kio3.py,$(wildcard tests/test_*.py))
+SOURCES     := *.py ai/ api/ components/ workflow/ tests/
+MYPY_SOURCES := $(wildcard *.py ai/*.py api/*.py components/*.py workflow/*.py tests/*.py)
+TESTS       := $(wildcard tests/test_*.py)
 DOCKER      ?= docker
-COMPOSE_FILE := dummy_kios/compose.yaml
 KIO1_IMAGE  ?= kio1-orchestrator:latest
-KIO_DUMMY_NETWORK ?= kio1-network
-KIO1_NETWORK ?=
+KIO1_NETWORK ?= kio1-network
+AGENT_CONFIG ?= agents.example.json
 OLLAMA_URL  ?= http://host.docker.internal:11434
 
-export KIO_DUMMY_NETWORK
-
-COMPOSE = $(DOCKER) compose -f $(COMPOSE_FILE)
-KIO1_DOCKER_ARGS = --network "$(KIO_DUMMY_NETWORK)" \
+KIO1_DOCKER_ARGS = --network "$(KIO1_NETWORK)" \
 	--add-host=host.docker.internal:host-gateway \
-	-p 127.0.0.1:5000:5000 \
 	-v "$(CURDIR)/config.json:/app/config.json:ro" \
 	-v "$(CURDIR)/chats:/app/chats" \
 	-v "$(CURDIR)/logs:/app/logs" \
 	-v "$(CURDIR)/assets:/app/assets" \
-	-v "$(CURDIR)/dummy_kios/agents.dummy.json:/app/agents.dummy.json:ro" \
-	-e KIO1_AGENT_CONFIG=/app/agents.dummy.json \
+	$(if $(strip $(AGENT_CONFIG)),-v "$(abspath $(AGENT_CONFIG)):/app/agents.json:ro" -e KIO1_AGENT_CONFIG=/app/agents.json) \
 	-e KIO1_OLLAMA_ENDPOINT="$(OLLAMA_URL)"
 KIO1_ONLY_NETWORK_ARGS = $(if $(strip $(KIO1_NETWORK)),--network "$(KIO1_NETWORK)")
 KIO1_ONLY_DOCKER_ARGS = $(KIO1_ONLY_NETWORK_ARGS) \
 	--add-host=host.docker.internal:host-gateway \
-	-p 127.0.0.1:5000:5000 \
 	-v "$(CURDIR)/config.json:/app/config.json:ro" \
 	-v "$(CURDIR)/chats:/app/chats" \
 	-v "$(CURDIR)/logs:/app/logs" \
@@ -73,52 +66,28 @@ check: lint typecheck ## Run all static checks (lint + typecheck)
 # ── Testing ───────────────────────────────────────────────────────────────────
 
 .PHONY: test
-test: ## Run tests, excluding the retired KIO3 receiver test
+test: ## Run KIO1 tests without UI or dummy-project dependencies
 	$(VENV)/bin/pytest $(TESTS) -v
 
 .PHONY: test-cov
-test-cov: ## Run tests with coverage, excluding the retired KIO3 receiver test
+test-cov: ## Run KIO1 tests with coverage
 	$(VENV)/bin/pytest $(TESTS) -v --cov=. --cov-report=term-missing
 
-# ── Docker: KIO1 + dummy agents ────────────────────────────────────────────
+# ── Docker: independent KIO1 API ──────────────────────────────────────────
 
-.PHONY: prepare docker-network dummy-build kio1-build docker-build
+.PHONY: prepare docker-network kio1-build
 prepare: ## Create host directories used by KIO1 bind mounts
 	mkdir -p chats logs assets
 
 docker-network: ## Create the shared Docker network if needed
-	$(DOCKER) network inspect "$(KIO_DUMMY_NETWORK)" >/dev/null 2>&1 || $(DOCKER) network create "$(KIO_DUMMY_NETWORK)"
-
-dummy-build: ## Build the KIO2-KIO13 dummy image
-	$(COMPOSE) build
+	$(DOCKER) network inspect "$(KIO1_NETWORK)" >/dev/null 2>&1 || $(DOCKER) network create "$(KIO1_NETWORK)"
 
 kio1-build: ## Build the KIO1 orchestrator image
 	$(DOCKER) build -t $(KIO1_IMAGE) .
 
-docker-build: dummy-build kio1-build ## Build both KIO1 and dummy images
-
-.PHONY: dummy-up dummy-up-detached dummy-status dummy-logs dummy-stop dummy-down
-dummy-up: docker-network ## Run dummy agents in the foreground
-	$(COMPOSE) up --no-log-prefix --no-color
-
-dummy-up-detached: docker-network ## Start dummy agents in the background and wait for health
-	$(COMPOSE) up -d --wait
-
-dummy-status: ## Show dummy agent status
-	$(COMPOSE) ps
-
-dummy-logs: ## Follow dummy agent task logs
-	$(COMPOSE) logs -f --no-log-prefix --no-color
-
-dummy-stop: ## Stop dummy agents without removing their containers
-	$(COMPOSE) stop
-
-dummy-down: ## Stop and remove dummy agent containers
-	$(COMPOSE) down
-
 .PHONY: docker-check ollama-check kio1-run kio1-up kio1-only-run kio1-only-up kio1-start kio1-status kio1-logs kio1-stop
 docker-check: ## Check Ollama and KIO7 connectivity from the KIO1 image
-	$(DOCKER) run --rm --network "$(KIO_DUMMY_NETWORK)" \
+	$(DOCKER) run --rm --network "$(KIO1_NETWORK)" \
 		--add-host=host.docker.internal:host-gateway \
 		-e OLLAMA_URL="$(OLLAMA_URL)" \
 		--entrypoint python $(KIO1_IMAGE) \
@@ -131,16 +100,18 @@ ollama-check: ## Check Ollama connectivity from the KIO1 image
 		--entrypoint python $(KIO1_IMAGE) \
 		-c 'import os, urllib.request; print(urllib.request.urlopen(os.environ["OLLAMA_URL"] + "/api/tags", timeout=5).status)'
 
-kio1-run: prepare docker-network ## Run KIO1 in the foreground
+kio1-run: prepare docker-network ## Run the KIO1 API in the foreground; AGENT_CONFIG enables dispatch
+	@test -z "$(AGENT_CONFIG)" || test -f "$(AGENT_CONFIG)"
 	$(DOCKER) run --rm --name kio1 $(KIO1_DOCKER_ARGS) $(KIO1_IMAGE)
 
-kio1-up: prepare docker-network ## Start KIO1 in the background with restart policy
+kio1-up: prepare docker-network ## Start the KIO1 API in the background
+	@test -z "$(AGENT_CONFIG)" || test -f "$(AGENT_CONFIG)"
 	$(DOCKER) run -d --name kio1 --restart unless-stopped $(KIO1_DOCKER_ARGS) $(KIO1_IMAGE)
 
-kio1-only-run: prepare ## Run KIO1 without the dummy-agent registry or network
+kio1-only-run: prepare docker-network ## Run the API without enabling workflow dispatch
 	$(DOCKER) run --rm --name kio1 $(KIO1_ONLY_DOCKER_ARGS) $(KIO1_IMAGE)
 
-kio1-only-up: prepare ## Start standalone KIO1 in the background with restart policy
+kio1-only-up: prepare docker-network ## Start the API without enabling workflow dispatch
 	$(DOCKER) run -d --name kio1 --restart unless-stopped $(KIO1_ONLY_DOCKER_ARGS) $(KIO1_IMAGE)
 
 kio1-start: ## Resume an existing stopped KIO1 container
@@ -158,7 +129,20 @@ kio1-stop: ## Stop KIO1 without removing its container
 # ── Composite ────────────────────────────────────────────────────────────────
 
 .PHONY: ci
-ci: format check test ## Full CI pipeline: format + lint + typecheck + tests
+ci: format-check check test ## Non-mutating quality gate
+
+.PHONY: build run up logs status stop
+build: kio1-build
+run: kio1-run
+up: kio1-up
+logs: kio1-logs
+status: kio1-status
+stop: kio1-stop
+
+.PHONY: test-stack
+test-stack: ## Verify prebuilt images using synthetic data and isolated containers
+	@test -f "$(UI_SOURCE)/Dockerfile" && test -f "$(DUMMY_SOURCE)/Dockerfile" || (printf 'Set UI_SOURCE and DUMMY_SOURCE to explicit checkouts\n'; exit 1)
+	$(PYTHON) tests/container_smoke.py --ui-source "$(UI_SOURCE)" --dummy-source "$(DUMMY_SOURCE)" $(STACK_ARGS)
 
 # ── Housekeeping ─────────────────────────────────────────────────────────────
 

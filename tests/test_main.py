@@ -100,7 +100,7 @@ class TestMainStartup:
         log_file = next((tmp_path / "logs").glob("log_*.log"))
         assert f"Session log: logs/{log_file.name}" in out
         assert "Loading Ollama model test-model..." in out
-        assert "KIO1 Orchestrator web UI: http://127.0.0.1:5000" in out
+        assert "KIO1 Orchestrator API: http://127.0.0.1:5000" in out
         mock_run.assert_called_once()
         _, run_kwargs = mock_run.call_args
         assert run_kwargs["host"] == "127.0.0.1"
