@@ -3,8 +3,8 @@ import os
 import sys
 import urllib.request
 
-from ai.ollama_client import (
-    PROVIDER_NAME,
+from ai.ollama_client import PROVIDER_NAME
+from ai.provider_client import (
     extract_content,
     preload_model,
     send_request,
@@ -58,7 +58,7 @@ def main() -> None:
         init_telemetry(config.telemetry, llm=config.model)
 
         startup_attributes = {
-            "gen_ai.provider.name": PROVIDER_NAME,
+            "gen_ai.provider.name": config.provider,
             "gen_ai.request.model": config.model,
             "gen_ai.conversation.id": session_id,
         }
@@ -66,9 +66,12 @@ def main() -> None:
         with trace_operation("kio1.startup", startup_attributes):
             system_prompt = load_prompt(config.prompt_path)
 
-            print(f"Loading Ollama model {config.model}...")
+            provider_label = (
+                "Ollama" if config.provider == "ollama" else config.provider
+            )
+            print(f"Loading {provider_label} model {config.model}...")
             with trace_provider_preload(
-                provider=PROVIDER_NAME,
+                provider=config.provider,
                 model=config.model,
             ):
                 preload_model(config)
@@ -77,7 +80,7 @@ def main() -> None:
                 config.chat_directory, system_prompt, session_id
             )
             record_session_started(
-                provider=PROVIDER_NAME,
+                provider=config.provider,
                 model=config.model,
             )
 
@@ -114,7 +117,7 @@ def main() -> None:
             session_success = True
         finally:
             record_session_completed(
-                provider=PROVIDER_NAME, model=config.model, success=session_success
+                provider=config.provider, model=config.model, success=session_success
             )
             logger.info("Session ended: duration_ms=%d", session_elapsed())
             shutdown_telemetry()

@@ -6,6 +6,10 @@ Each project has its own image, dependencies, documentation, test suite, and bui
 
 All projects use `kio1-network`. Configure `KIO1_NETWORK`, `KIO_NETWORK`, and `KIO_DUMMY_NETWORK` to the same name for alternate deployments. The existing dummy registry endpoints require no changes. `KIO1_API_URL` in UI defaults to `http://kio1:5000`.
 
+## Hosted Providers
+
+To use Groq or OpenRouter instead of Ollama, select `provider` and `model` in `config.json` and paste the key into `api_key`. No shell export is required: Docker mounts this local file read-only, and the build context excludes it. See [provider credentials](configuration.md#groq-and-openrouter). Keep the file untracked and restrict access while allowing container UID 1000 to read it. Build the updated image and launch normally; skip Ollama connectivity checks. Restart KIO1 after editing the mounted config. Environment variables remain an optional fallback when `api_key` is empty; recreate containers to change their environment or load a rebuilt image. No keys go into the image or version-controlled files. Only the selected provider needs credentials.
+
 ## External Ollama
 
 Verify the model named in your configuration is installed and Ollama remains running:

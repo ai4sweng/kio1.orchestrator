@@ -79,6 +79,52 @@ def write_config(tmp_path: Path) -> None:
 class TestMainStartup:
     """Tests driving `main()` up to (but not including) the blocking web server."""
 
+    @pytest.mark.parametrize("provider", ["groq", "openrouter"])
+    def test_hosted_startup_skips_ollama_and_labels_telemetry(
+        self,
+        provider: str,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Start hosted providers without network preloading or Ollama labels.
+
+        Args:
+            provider: Selected hosted service.
+            tmp_path: Scratch startup directory.
+            monkeypatch: Environment and working-directory isolation.
+
+        Returns:
+            None; verifies startup and shutdown use the selected provider.
+        """
+        write_config(tmp_path)
+        config_path = tmp_path / "config.json"
+        data = json.loads(config_path.read_text())
+        data["provider"] = provider
+        config_path.write_text(json.dumps(data))
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("GROQ_API_KEY", "synthetic-groq-key")
+        monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-openrouter-key")
+        with (
+            patch("flask.Flask.run") as serve,
+            patch("main.urllib.request.urlopen") as urlopen,
+            patch("ai.provider_client.urllib.request.build_opener") as opener,
+            patch("main.record_session_started") as started,
+            patch("main.record_session_completed") as completed,
+        ):
+            main_module.main()
+        serve.assert_called_once()
+        urlopen.assert_not_called()
+        opener.assert_not_called()
+        started.assert_called_once_with(provider=provider, model="test-model")
+        completed.assert_called_once_with(
+            provider=provider, model="test-model", success=True
+        )
+        logs = next((tmp_path / "logs").glob("log_*.log")).read_text()
+        assert f"provider={provider}" in logs
+        assert "Model preload skipped:" in logs
+        assert "synthetic-groq-key" not in logs
+        assert "synthetic-openrouter-key" not in logs
+
     @patch("flask.Flask.run")
     @patch("main.urllib.request.urlopen")
     def test_preloads_model_and_starts_web_server(

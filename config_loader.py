@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -39,6 +40,73 @@ class Config:
     endpoint: str
     context_window_size: int
     telemetry: TelemetryConfig = field(default_factory=TelemetryConfig)
+    provider: str = "ollama"
+    api_key_env: str = field(default="", repr=False)
+    api_key: str = field(default="", repr=False)
+
+
+def resolve_api_key_env(provider: str, configured_name: str) -> str:
+    """Resolve a credential variable name without reflecting secret-like input.
+
+    Args:
+        provider: Selected hosted provider.
+        configured_name: Optional environment variable name from configuration.
+
+    Returns:
+        The validated name, or the selected provider's standard variable name.
+
+    Raises:
+        ValueError: The field contains a key-like value or invalid variable name.
+    """
+    default_name = {"groq": "GROQ_API_KEY", "openrouter": "OPENROUTER_API_KEY"}[
+        provider
+    ]
+    if not isinstance(configured_name, str):
+        raise ValueError(
+            "api_key_env must be an environment variable name, not an API key."
+        )
+    name = configured_name.strip() or default_name
+    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name) or name.lower().startswith(
+        ("gsk_", "sk-", "sk_")
+    ):
+        raise ValueError(
+            "api_key_env must contain an environment variable name, not an API key. "
+            f"Paste the key in api_key instead, or use {default_name} as the variable name."
+        )
+    return name
+
+
+def resolve_api_key(provider: str, configured_key: str, configured_name: str) -> str:
+    """Use a directly configured key before falling back to the environment.
+
+    Args:
+        provider: Selected hosted provider.
+        configured_key: Optional API key stored in the local configuration.
+        configured_name: Optional environment variable reference for fallback.
+
+    Returns:
+        The validated credential, without logging its value.
+
+    Raises:
+        ValueError: The selected key is missing or unsafe for an HTTP header.
+    """
+    if not isinstance(configured_key, str):
+        raise ValueError("api_key must be a string.")
+    api_key = configured_key.strip()
+    if not api_key:
+        key_env = resolve_api_key_env(provider, configured_name)
+        api_key = os.environ.get(key_env, "").strip()
+    if not api_key:
+        raise ValueError(
+            f"Missing API key for {provider}. Set api_key in config.json, "
+            "or set the environment variable named by api_key_env "
+            f"(default: {resolve_api_key_env(provider, '')})."
+        )
+    if any(not 33 <= ord(character) <= 126 for character in api_key):
+        raise ValueError(
+            "API key must contain only printable ASCII without whitespace."
+        )
+    return api_key
 
 
 def _load_telemetry_config(data: dict[str, Any]) -> TelemetryConfig:
@@ -196,23 +264,48 @@ def load_config(config_path: str = "config.json") -> Config:
         if type(max_output_tokens) is not int or max_output_tokens <= 0:
             raise ValueError("max_output_tokens must be a positive integer.")
 
-        endpoint = _load_endpoint(data)
-        endpoint_override = os.environ.get("KIO1_OLLAMA_ENDPOINT")
-        if endpoint_override:
-            endpoint = endpoint_override.strip().rstrip("/")
+        provider = data.get("provider", "ollama")
+        if provider not in ("ollama", "groq", "openrouter"):
+            raise ValueError("provider must be ollama, groq, or openrouter.")
+        model = data.get("model")
+        if not isinstance(model, str) or not model.strip():
+            raise ValueError("model must be a non-empty string.")
 
-        context_window_size = _load_context_window_size(data, max_output_tokens)
+        api_key_env = data.get("api_key_env", "")
+        if not isinstance(api_key_env, str):
+            raise ValueError("api_key_env must be an environment variable name.")
+        api_key_env = api_key_env.strip()
+        api_key = data.get("api_key", "")
+        if not isinstance(api_key, str):
+            raise ValueError("api_key must be a string.")
+        api_key = api_key.strip()
+        if provider == "ollama":
+            endpoint = _load_endpoint(data)
+            endpoint_override = os.environ.get("KIO1_OLLAMA_ENDPOINT")
+            if endpoint_override:
+                endpoint = endpoint_override.strip().rstrip("/")
+            context_window_size = _load_context_window_size(data, max_output_tokens)
+        else:
+            endpoint = {
+                "groq": "https://api.groq.com/openai/v1",
+                "openrouter": "https://openrouter.ai/api/v1",
+            }[provider]
+            if not api_key:
+                api_key_env = resolve_api_key_env(provider, api_key_env)
+            resolve_api_key(provider, api_key, api_key_env)
+            context_window_size = 0
 
     logger.info(
-        "Config loaded: model=%s prompt_path=%s endpoint=%s duration_ms=%d",
-        data["model"],
+        "Config loaded: provider=%s model=%s prompt_path=%s endpoint=%s duration_ms=%d",
+        provider,
+        model.strip(),
         data["prompt_path"],
         endpoint,
         elapsed(),
     )
 
     return Config(
-        model=data["model"],
+        model=model.strip(),
         prompt_path=data["prompt_path"],
         chat_directory=data["chat_directory"],
         temperature=data["temperature"],
@@ -222,4 +315,7 @@ def load_config(config_path: str = "config.json") -> Config:
         endpoint=endpoint,
         context_window_size=context_window_size,
         telemetry=telemetry,
+        provider=provider,
+        api_key_env=api_key_env,
+        api_key=api_key,
     )

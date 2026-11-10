@@ -40,15 +40,18 @@ Core model and telemetry settings are stored in `config.json` at the project roo
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `model` | string | Ollama model identifier |
+| `provider` | string | `ollama` (default), `groq`, or `openrouter` |
+| `model` | string | Model identifier recognized by the selected provider |
+| `api_key` | string | Hosted API key pasted directly into the local config; non-empty values take precedence over environment credentials |
+| `api_key_env` | string | Optional fallback variable name when `api_key` is empty; empty uses `GROQ_API_KEY` or `OPENROUTER_API_KEY` |
 | `prompt_path` | string | Path to the system prompt file (relative to project root) |
 | `chat_directory` | string | Directory for chat history files |
 | `temperature` | float | Sampling temperature (lower = more deterministic) |
 | `request_timeout` | float | Request timeout in seconds |
 | `keep_alive` | int | Ollama model residency in seconds (`-1` = keep loaded; default: `-1`) |
 | `max_output_tokens` | int | Maximum number of generated output tokens; must be positive (default: `4096`) |
-| `endpoint` | string | Ollama base URL |
-| `context_window_size` | int | Ollama context window in tokens; must be larger than `max_output_tokens` |
+| `endpoint` | string | Ollama base URL; ignored by hosted providers, which use fixed HTTPS endpoints |
+| `context_window_size` | int | Ollama-only context window; must be larger than `max_output_tokens`; not sent to hosted services |
 | `telemetry` | object | Optional OpenTelemetry configuration; telemetry is disabled when omitted |
 | `telemetry.enabled` | boolean | Enables trace and metric export (default: `false`) |
 | `telemetry.service_name` | string | Non-empty service name attached to exported telemetry (default: `kio1-orchestrator`) |
@@ -61,6 +64,9 @@ Core model and telemetry settings are stored in `config.json` at the project roo
 
 ```json
 {
+    "provider": "ollama",
+    "api_key": "",
+    "api_key_env": "",
     "model": "ministral-3:8b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
@@ -80,6 +86,38 @@ Core model and telemetry settings are stored in `config.json` at the project roo
     }
 }
 ```
+
+## Groq and OpenRouter
+
+Select one provider and its model in `config.json`. Existing configurations without `provider` continue using Ollama. Restart local KIO1 after configuration changes; recreate Docker containers after changing credentials or rebuilding the image.
+
+| Provider | Example model identifier | Default API key environment variable |
+|----------|--------------------------|--------------------------------------|
+| `ollama` | `ministral-3:8b` | Not required |
+| `groq` | `openai/gpt-oss-20b` | `GROQ_API_KEY` |
+| `openrouter` | `openai/gpt-4o-mini` | `OPENROUTER_API_KEY` |
+
+Model names are examples, not availability guarantees. Choose a model available to your account that supports chat and JSON-object output. Unsupported models or parameters fail explicitly; there is no automatic model/provider fallback.
+
+For Groq, change these fields while retaining the other shared settings:
+
+```json
+"provider": "groq",
+"model": "openai/gpt-oss-20b",
+"api_key": "gsk_REPLACE_WITH_YOUR_NEW_KEY"
+```
+
+Paste your actual key into `api_key` in your local `config.json`, not into this documentation or `config.json.example`. No `export` is needed. Leave `api_key_env` empty when using a direct key; a non-empty `api_key` takes precedence over any environment setting. Keys are stripped of surrounding whitespace, validated before use, and excluded from config representations, provider logs, and error messages.
+
+For OpenRouter, use `"provider": "openrouter"`, set its model identifier, and paste its key into the same `api_key` field.
+
+If you prefer environment credentials, leave `api_key` empty and optionally set `api_key_env` to the variable name (`GROQ_API_KEY` or `OPENROUTER_API_KEY` by default). `api_key_env` is never the key itself. Key-like values in this field are rejected without being echoed in errors when resolving environment credentials. If a key has appeared in a log, terminal transcript, or chat, revoke it and generate a replacement before continuing.
+
+Start locally with `python main.py`, or rebuild with `make build` and launch with `make run` / `make up`. Docker already mounts `config.json` read-only, so direct keys work without additional Docker arguments. The file is excluded from the build context and must remain untracked by Git. Protect its file permissions and backups; the container user (UID 1000) must be able to read it. Never paste a real key into the tracked example file. Optional environment credentials still work: Make forwards the two standard variable names from the invoking shell without printing their values. Custom variable names require explicit manual Docker forwarding. Container administrators can access mounted files and environments.
+
+Hosted providers do not preload models or need Ollama running. `keep_alive`, `endpoint`, `context_window_size`, and `KIO1_OLLAMA_ENDPOINT` only affect Ollama. Shared `temperature`, `request_timeout`, and `max_output_tokens` still apply. Groq uses `https://api.groq.com/openai/v1/chat/completions`; OpenRouter uses `https://openrouter.ai/api/v1/chat/completions`. Requests use bearer authentication, non-streaming chat, `max_tokens`, and `response_format: {"type": "json_object"}`. Redirects, refusals, empty/malformed responses, responses larger than 1 MiB, and truncated completions fail rather than being persisted as successful turns. HTTP failures (including 401, 429, and 5xx) and timeouts are not retried.
+
+Hosted generation sends the system prompt and full active conversation to the selected external provider. Check data-handling requirements and billing before using sensitive inputs. Missing credentials fail at startup; authentication and model availability are checked on the first actual request, not by a paid startup probe. Direct keys are held privately in `Config`; environment fallback keys are read when needed. Neither source is logged by the provider transport. See [Observability](observability.md) for diagnostics.
 
 ## Keeping Model Loaded
 

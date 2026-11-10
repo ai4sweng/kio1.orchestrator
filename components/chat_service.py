@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from ai.ollama_client import PROVIDER_NAME, extract_content, send_request
+from ai.provider_client import extract_content, send_request
 from chat_history import append_assistant_message, append_user_message, load_messages
 from config_loader import Config
 from telemetry import trace_gen_ai_request, trace_turn
@@ -16,7 +16,7 @@ def run_turn(
     turn: int,
     query: str,
 ) -> str:
-    """Send a query to Ollama and persist the exchange.
+    """Send a query to the configured provider and persist the exchange.
 
     Args:
         config: Application configuration.
@@ -32,14 +32,14 @@ def run_turn(
     with trace_turn(
         session_id=session_id,
         turn_number=turn,
-        provider=PROVIDER_NAME,
+        provider=config.provider,
         model=config.model,
     ):
         messages = load_messages(chat_file)
         messages.append({"role": "user", "content": query})
 
         with trace_gen_ai_request(
-            provider=PROVIDER_NAME,
+            provider=config.provider,
             model=config.model,
             session_id=session_id,
             turn_number=turn,

@@ -2,10 +2,7 @@
 
 ## Local Debugging Logs
 
-Start KIO1 with `python3 main.py`. Startup prints the session log path, for example
-`Session log: logs/log_20261030_120000_a1b2c3d4.log`. Each server run uses one log
-file; creating or switching browser conversations does not create another log.
-File records are flushed as they are written. No OpenTelemetry setup is required.
+Start KIO1 with `python3 main.py`. Startup prints the session log path, for example `Session log: logs/log_20261030_120000_a1b2c3d4.log`. Each server run uses one log file; creating or switching browser conversations does not create another log. File records are flushed as they are written. No OpenTelemetry setup is required.
 
 Follow the newest file while submitting queries:
 
@@ -19,17 +16,10 @@ Filter existing logs for planning and execution diagnostics:
 rg 'Query processed|Workflow plan|Workflow completed|Workflow rejected|Task outcome unknown|Task blocked' logs/log_*.log
 ```
 
-Each line has a UTC timestamp, server session ID, level, logger name, and message.
-Use `conversation_id` and `turn` to find a query, then `workflow_id` to follow its
-execution. These are illustrative messages (timings are examples):
+Each line has a UTC timestamp, server session ID, level, logger name, and message. Use `conversation_id` and `turn` to find a query, then `workflow_id` to follow its execution. These are illustrative messages (timings are examples):
 
 ```text
-Query processed: conversation_id=20261030_120000_a1b2c3d4 turn=1 status=succeeded duration_ms=1420 format_duration_ms=1 response_type=workflow_plan
-Workflow plan generated: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' execution_mode='sequential' step_count=2 dispatch=not_started
-Workflow plan step: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' step_id='s1' agent_id='KIO7' capability='code_generation' depends_on=[]
-Workflow started: workflow_id=wf-123 execution_mode=sequential step_count=2 validation_duration_ms=1
-Task dispatch finished: workflow_id=wf-123 step_id=s1 agent_id=KIO7 status=succeeded duration_ms=230 http_status=200 request_bytes=510 response_bytes=320
-Workflow completed: workflow_id=wf-123 status=succeeded duration_ms=451 step_count=2 succeeded=2 failed=0 unknown=0 blocked=0
+Query processed: conversation_id=20261030_120000_a1b2c3d4 turn=1 status=succeeded duration_ms=1420 format_duration_ms=1 response_type=workflow_plan Workflow plan generated: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' execution_mode='sequential' step_count=2 dispatch=not_started Workflow plan step: conversation_id=20261030_120000_a1b2c3d4 turn=1 workflow_id='wf-123' step_id='s1' agent_id='KIO7' capability='code_generation' depends_on=[] Workflow started: workflow_id=wf-123 execution_mode=sequential step_count=2 validation_duration_ms=1 Task dispatch finished: workflow_id=wf-123 step_id=s1 agent_id=KIO7 status=succeeded duration_ms=230 http_status=200 request_bytes=510 response_bytes=320 Workflow completed: workflow_id=wf-123 status=succeeded duration_ms=451 step_count=2 succeeded=2 failed=0 unknown=0 blocked=0
 ```
 
 - **After a query:** `Turn completed` measures inference/history processing; `Query processed` adds formatting and reports total processing time, excluding time waiting for the chat-session lock. Existing `Response received` messages include model request duration, input/output tokens, and tokens per second.
@@ -41,7 +31,22 @@ Workflow completed: workflow_id=wf-123 status=succeeded duration_ms=451 step_cou
 
 These timings measure latency, not plan quality, energy use, or container resource usage. Restart KIO1 after updating application code to enable new log messages.
 
+### Hosted Provider Diagnostics
+
+Groq and OpenRouter use the same session log files. `Config loaded` identifies the selected provider and model; `Model preload skipped` confirms that hosted startup does not contact Ollama. `Provider request started` records message count, and `Response received` records provider, model, duration, HTTP status, token usage when supplied, and finish reason. `Provider request failed` records the failure phase, HTTP status when available, exception type, and elapsed time. Missing keys fail startup; 401/403 usually require checking credentials or account permissions, 429 indicates rate/quota limits, and 5xx or connection failures require checking service/network health. Inspect the provider dashboard for detailed diagnostics; remote error bodies and authentication headers are deliberately excluded.
+
+```bash
+rg 'Config loaded|Model preload skipped|Provider request|Response received' logs/log_*.log
+```
+
+Hosted requests send `User-Agent: KIO1-Orchestrator/1.0`. Groq's edge can reject urllib's default User-Agent with HTTP 403 and edge code 1010 even when the key is valid. In that case, rebuild and recreate KIO1 with the updated client rather than repeatedly changing credentials. HTTP rejections now report `phase=http_status`; `phase=connect` is reserved for transport failures before an HTTP response. Model availability is separate from authentication: a model no longer listed by the provider must be replaced explicitly in the local config.
+
+OpenRouter HTTP 402 is a provider credit/request-budget rejection, not a local connection failure. Check [account credits](https://openrouter.ai/credits) and the API key's available credit/budget. A request reserves capacity for the configured output limit, so reducing `max_output_tokens` can help when a smaller request is affordable; it does not fix a zero balance and may truncate plans. An explicitly selected free model is another option, subject to availability, account requirements, and rate limits. Some in-flight-budget 402 responses can be temporary; consult OpenRouter's dashboard and [error guide](https://openrouter.ai/docs/api/reference/errors-and-debugging). KIO1 never adds credits, changes models, or retries automatically. Its 402 message now identifies the credit/budget issue and includes the requested output limit without revealing the raw provider error or credentials.
+
+The hosted transport omits prompts, replies, keys, and raw error bodies even at DEBUG. This does not make all application output private: the API still prints queries and successful replies to stdout, and workflow dispatch logs task bodies. Existing Ollama DEBUG payload logging is unchanged. Protect both logs and stdout. Traces and session/token metrics identify the actual selected provider, rather than labeling every call as Ollama. Groq/OpenRouter monetary costs are not estimated by the existing fixed-coefficient telemetry; use provider billing.
+
 ### Terminal JSON Output
+Direct credentials from `config.json` are excluded from `Config` representations, provider logs, and validation errors just like environment-based credentials. Do not log or share the raw configuration file; it may now contain the API key.
 
 After inference, stdout prints the user query, raw LLM response, and formatted workflow JSON in labeled blocks. During **Run workflow**, each outgoing task prints a **KIO1 agent payload JSON** block containing the actual JSON request body, including dependency results. A generated plan is not the same as an agent task payload: dependent payloads cannot be finalized until prerequisites finish. Printing a payload means delivery is being attempted, not that it succeeded; check the session log for its outcome.
 
@@ -102,7 +107,7 @@ The orchestrator produces the following spans:
 | `kio1.startup` | Prompt, model, and session initialization |
 | `kio1.provider.preload` | Ollama model preload |
 | `kio1.turn` | Complete processing time for one user turn |
-| `chat <model>` | Ollama request and response |
+| `chat <model>` | Selected provider request and response |
 | `kio1.response.format` | Response parsing and workflow extraction |
 
 The spans form parent-child relationships. For example, a `kio1.turn` span contains the model request and response-formatting spans.

@@ -19,6 +19,7 @@ KIO1_DOCKER_ARGS = --network "$(KIO1_NETWORK)" \
 	-v "$(CURDIR)/chats:/app/chats" \
 	-v "$(CURDIR)/logs:/app/logs" \
 	-v "$(CURDIR)/assets:/app/assets" \
+	-e GROQ_API_KEY -e OPENROUTER_API_KEY \
 	$(if $(strip $(AGENT_CONFIG)),-v "$(abspath $(AGENT_CONFIG)):/app/agents.json:ro" -e KIO1_AGENT_CONFIG=/app/agents.json) \
 	-e KIO1_OLLAMA_ENDPOINT="$(OLLAMA_URL)"
 KIO1_ONLY_NETWORK_ARGS = $(if $(strip $(KIO1_NETWORK)),--network "$(KIO1_NETWORK)")
@@ -28,6 +29,7 @@ KIO1_ONLY_DOCKER_ARGS = $(KIO1_ONLY_NETWORK_ARGS) \
 	-v "$(CURDIR)/chats:/app/chats" \
 	-v "$(CURDIR)/logs:/app/logs" \
 	-v "$(CURDIR)/assets:/app/assets" \
+	-e GROQ_API_KEY -e OPENROUTER_API_KEY \
 	-e KIO1_OLLAMA_ENDPOINT="$(OLLAMA_URL)"
 
 # ── Bootstrap ───────────────────────────────────────────────────────────────

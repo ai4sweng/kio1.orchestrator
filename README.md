@@ -4,11 +4,11 @@ KIO1 owns model requests, prompts and capabilities, chat history, uploads, workf
 
 ## Requirements
 
-Python 3.10+ for local development; Docker for container deployment; a reachable external Ollama service with the model named in [config.json](config.json). Docker examples keep Ollama external and use `http://host.docker.internal:11434` on Linux through the host-gateway mapping.
+Python 3.10+ for local development; Docker for container deployment; either a reachable external Ollama service or a Groq/OpenRouter account and API key. Select `provider` and `model` in [config.json](config.json). Ollama remains the default; Docker examples use `http://host.docker.internal:11434` on Linux through the host-gateway mapping. See [hosted-provider setup](docs/configuration.md#groq-and-openrouter) for secure key entry, example models, and Docker forwarding. Hosted providers do not require Ollama.
 
 ## Build and Run
 
-Run commands from this project root with Ollama running and reachable:
+Run commands from this project root with the selected provider configured and reachable:
 
 ```bash
 make build
@@ -53,7 +53,7 @@ Local startup binds the API to `127.0.0.1:5000`, not a browser page. Set `KIO1_W
 
 ## Configuration and Persistence
 
-Docker mounts [config.json](config.json) read-only and mounts `chats/`, `logs/`, and `assets/` from this project. Existing files stay in place and are not migrated or reset. `AGENT_CONFIG` mounts the selected existing registry read-only. Tokens remain environment-based; use an appropriate Docker environment file for real agents, never store secrets in source or image layers.
+Docker mounts [config.json](config.json) read-only and mounts `chats/`, `logs/`, and `assets/` from this project. Existing files stay in place and are not migrated or reset. Paste a Groq/OpenRouter key into `api_key` in the local config; no shell export is required. Keep this file untracked and private; it is excluded from image builds. `AGENT_CONFIG` mounts the selected existing registry read-only. Agent tokens remain environment-based; use an appropriate Docker environment file for real agents, never store secrets in source or image layers.
 
 `OLLAMA_URL` overrides the model endpoint for Docker commands. `KIO1_NETWORK` overrides the shared network; configure the same name in UI (`KIO_NETWORK`) and dummy-kios (`KIO_DUMMY_NETWORK`). See [Configuration](docs/configuration.md) and [Deployment](docs/deployment.md) for endpoint checks, host binding, and AWS operation.
 

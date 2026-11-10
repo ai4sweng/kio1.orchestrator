@@ -1,4 +1,7 @@
 {
+    "provider": "ollama",
+    "api_key": "",
+    "api_key_env": "",
     "model": "ministral-3:8b",
     "prompt_path": "prompts/kio1_system_prompt_ver1.txt",
     "chat_directory": "chats",
