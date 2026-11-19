@@ -133,10 +133,12 @@ kio1-stop: ## Stop KIO1 without removing its container
 .PHONY: ci
 ci: format-check check test ## Non-mutating quality gate
 
-.PHONY: build run up logs status stop
+.PHONY: build run up server-build server-run logs status stop
 build: kio1-build
 run: kio1-run
 up: kio1-up
+server-build: build ## Build the server image (same as build)
+server-run: up ## Start the server container in the background (same as up)
 logs: kio1-logs
 status: kio1-status
 stop: kio1-stop

@@ -70,7 +70,9 @@ The tests mock Ollama and exporters and use temporary data. Neither UI nor dummy
 
 ## Operations and Safety
 
-Use `make up` instead of `make run` for detached operation with `unless-stopped`. Use `make logs`, `make status`, and `make stop`; existing `kio1-*` targets remain aliases. To resume a stopped detached container use `make kio1-start`. Build changes do not update running containers; preserve the old named container before replacement and retain its data mounts.
+On the server, run `make server-build && make run-server`. These are aliases for `make build` and `make up`: KIO1 starts detached with `unless-stopped` and keeps running after SSH logout. To select a custom registry, run `make run-server AGENT_CONFIG=agents.json`. See [Deployment](docs/deployment.md#aws-and-detached-operation) for the full three-project setup.
+
+Use `make logs`, `make status`, and `make stop`; existing `kio1-*` targets remain aliases. To resume a stopped detached container use `make kio1-start`. Build changes do not update running containers; preserve the old named container before replacement and retain its data mounts.
 
 Health at `/health` reports a started API, not current Ollama or receiver readiness. `/api/settings` returns only model name, workflow-enabled status, and capabilities. Existing API payloads, locks, approval requirements, timeouts, and task contracts are preserved. KIO1 still has one shared operator session, no authentication, no durable workflow queue, and no automatic task recovery. Do not increase worker count: state and locks are process-local.
 
