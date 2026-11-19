@@ -36,10 +36,10 @@ Generate a plan, edit if needed, then approve Run workflow. Generation alone sen
 Install Docker Engine and the Compose plugin on the server and retain all three independent checkouts and persistent KIO1 storage. Enable Docker at boot using your distribution's service administration. Set up KIO1's `config.json` and check Ollama if using it. In each project root (`dummy-kios`, `kio1`, then `ui`), run:
 
 ```bash
-make server-build && make run-server
+make server-build && make server-run
 ```
 
-`server-build` uses the normal build, and `run-server` uses the existing detached `up` target (`run-derver` is an alias for `run-server`). KIO1 uses `agents.example.json` by default; use `make run-server AGENT_CONFIG=agents.json` for a custom trusted registry already present on the server. Use `make status` and `make logs` in each checkout to check startup. All containers use `unless-stopped`. SSH logout does not stop them; manually stopped containers stay stopped, and an unhealthy status alone does not trigger a restart.
+`server-build` uses the normal build, and `server-run` uses the existing detached `up` target. KIO1 uses `agents.example.json` by default; use `make server-run AGENT_CONFIG=agents.json` for a custom trusted registry already present on the server. Use `make status` and `make logs` in each checkout to check startup. All containers use `unless-stopped`. SSH logout does not stop them; manually stopped containers stay stopped, and an unhealthy status alone does not trigger a restart.
 
 Access from a laptop with `ssh -N -L 5000:127.0.0.1:5000 LOGIN@EC2_HOST`, then open the local URL. Keep SSH restricted to trusted clients; no public 5000 rule is required. An existing authenticated reverse proxy should point to UI's published loopback port, not KIO1. Ollama must also run persistently. EC2 stop/termination is different from logout.
 

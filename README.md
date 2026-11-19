@@ -70,7 +70,7 @@ The tests mock Ollama and exporters and use temporary data. Neither UI nor dummy
 
 ## Operations and Safety
 
-On the server, run `make server-build && make run-server`. These are aliases for `make build` and `make up`: KIO1 starts detached with `unless-stopped` and keeps running after SSH logout. To select a custom registry, run `make run-server AGENT_CONFIG=agents.json`. See [Deployment](docs/deployment.md#aws-and-detached-operation) for the full three-project setup.
+On the server, run `make server-build && make server-run`. These are aliases for `make build` and `make up`: KIO1 starts detached with `unless-stopped` and keeps running after SSH logout. To select a custom registry, run `make server-run AGENT_CONFIG=agents.json`. See [Deployment](docs/deployment.md#aws-and-detached-operation) for the full three-project setup.
 
 Use `make logs`, `make status`, and `make stop`; existing `kio1-*` targets remain aliases. To resume a stopped detached container use `make kio1-start`. Build changes do not update running containers; preserve the old named container before replacement and retain its data mounts.
 
