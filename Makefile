@@ -133,7 +133,7 @@ kio1-stop: ## Stop KIO1 without removing its container
 .PHONY: ci
 ci: format-check check test ## Non-mutating quality gate
 
-.PHONY: build run up server-build server-run logs status stop
+.PHONY: build run up server-build server-run logs status stop down
 build: kio1-build
 run: kio1-run
 up: kio1-up
@@ -142,6 +142,8 @@ server-run: up ## Start the server container in the background (same as up)
 logs: kio1-logs
 status: kio1-status
 stop: kio1-stop
+down: ## Stop and remove the KIO1 container without deleting host data
+	$(DOCKER) rm -f kio1
 
 .PHONY: test-stack
 test-stack: ## Verify prebuilt images using synthetic data and isolated containers
